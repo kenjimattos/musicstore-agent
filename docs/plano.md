@@ -50,6 +50,18 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
 - **`agent/agent.py`, ~100 linhas:**
   - `respond()` é uma função com `if/else` explícitos;
   - **A entrada é `(phone, text)`, o mesmo contrato de um webhook do WhatsApp.** O código busca o cliente pelo telefone, comparando só os dígitos para ignorar a formatação; número desconhecido vira visitante. A UI é só uma fonte de mensagens. Para ir a produção, basta um endpoint que recebe o webhook e chama `respond()`, sem mudar o agente.
+  - **Identificação em toda mensagem, logo no início, em código:** `identify_customer(phone)` é a 1ª coisa que o `respond()` faz, antes do input_guard.
+    - É uma consulta SQL indexada pelo telefone, sem LLM e sem custo de tokens.
+    - Roda a cada mensagem, como um webhook, que recebe o telefone em toda mensagem. O `respond()` não guarda identidade entre mensagens.
+    - O resultado tem dois usos: o `customer_id` é injetado nas tools de pedido, e o **primeiro nome** + o status vão para o bloco dinâmico do system prompt (ver "Prompt caching").
+  - **Identificar ≠ carregar dados:** pedidos, itens e rastreio só entram no contexto quando o cliente pergunta, via `get_my_orders`. Numa consulta de preço, o único dado do cadastro no contexto é o primeiro nome.
+  - **Por que não buscar o cadastro sob demanda (via tool), justificativa para o README:**
+    - carregar no início custa uma query de microssegundos e uns 10–15 tokens por mensagem;
+    - uma tool `get_customer()` custaria uma ida a mais ao modelo sempre que fosse usada, com o contexto inteiro reenviado e mais latência;
+    - o modelo poderia esquecer de chamar e tratar um cliente como visitante (pedindo e-mail sem necessidade);
+    - o cumprimento pelo nome na 1ª mensagem se perderia (seção 7.2 do manual);
+    - seria uma tool a mais para o Haiku escolher.
+    - **Quando a busca sob demanda faria sentido:** se o cadastro viesse de um CRM externo lento ou pago por consulta. Aí valeria buscar só quando necessário, ou guardar em cache por conversa.
   - `run_agent_loop()` é o loop clássico de tool use: chama `client.messages.create(tools=...)`; enquanto `stop_reason == "tool_use"`, executa as tools e devolve `tool_result`; para no `end_turn` ou no limite de `MAX_TOOL_ITERATIONS`, que é o limite de custo.
   - **`MAX_TOOL_ITERATIONS = 5`**, configurável por env. Uma iteração é uma ida ao modelo que pede tools; o modelo pode pedir várias tools em paralelo na mesma iteração.
     - O fluxo legítimo mais longo previsto usa 3 idas ao modelo: produto sem estoque (`search_products` → `get_product_details` → resposta) e pedido fora do 1º do ranking (`get_my_orders()` → `get_my_orders(order_id)` → resposta). O caso comum de pedido usa 2 idas.
@@ -73,7 +85,11 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
 - **Memória:** tabela `messages` (`thread_id`, `role`, `content` JSON, `created_at`) no mesmo banco.
   - A cada turno, carrega o histórico do thread e acrescenta as mensagens novas, inclusive tool_use/tool_result, para o modelo manter o contexto.
   - As conversas sobrevivem a restart.
-- **Prompt caching:** `cache_control` no bloco de system que contém o manual.
+- **Prompt caching:** o system prompt tem dois blocos.
+  1. **Bloco fixo**, com `cache_control`: persona + regras + few-shot + manual. É igual para todos os clientes, então o cache vale entre conversas.
+  2. **Bloco dinâmico**, depois do fixo e fora do cache. Leva `Cliente: Ana (identificada pelo telefone)` ou `Cliente: visitante (número não cadastrado)`, a `REFERENCE_DATE` e o tom detectado no turno.
+     - Do cadastro, vai só o primeiro nome e o status: nunca e-mail, telefone ou pedidos.
+     - Como fica depois do bloco cacheado, mudar de cliente ou de turno não invalida o cache do manual.
 
 ## Persona (`agent/prompts.py`)
 **Quem é:** um atendente que é músico, um roqueiro que entende muito de instrumentos e de som, falando com outro músico.
@@ -270,11 +286,20 @@ musicstore-agent/
   - A descrição do produto 144 (Roland) diz "Yamaha".
   - Categorias 6–8 estão vazias.
   - O manual diz "300+ instrumentos", mas há 64 no CSV.
+  - **Cadastros possivelmente duplicados:**
+    - Bruno 11 e Bruno 43 têm o mesmo e-mail e a mesma cidade, com telefones diferentes;
+    - Diego 13 e Diego 47 têm nomes parecidos, com e-mail, telefone e cidade diferentes.
+
+    **Decisão:** cada cadastro é um cliente distinto, e o agente **não unifica** cadastros por nome nem por e-mail. Unificar errado vazaria pedidos de uma pessoa para outra; não unificar, no pior caso, faz o cliente pedir ajuda à equipe.
+    - Os telefones são únicos na base, então a identificação pelo número é inequívoca.
+    - Em produção, a deduplicação seria feita no cadastro (por CPF, por exemplo), não pelo agente.
 - **Data de referência:** os pedidos vão até 22/03/2026. Com a data real (nov/2026), toda devolução cairia fora do prazo. Por isso a "data atual" vem de `REFERENCE_DATE` no env, com default `2026-03-25`, logo após o último pedido. Se a variável ficar vazia, usa a data real. Suposição documentada.
 - **Data atual injetada no prompt:** a janela de arrependimento (7 dias) e a de defeito (30 dias) usam `estimated_delivery` como proxy da data de recebimento.
 
 ## UI (`app.py`): simulação do WhatsApp
 - **Sidebar, "Simular conversa como":** um seletor **por nome do cliente**, com "Visitante (número não cadastrado)" + os nomes de `customers.csv`.
+  - As opções são indexadas pelo `customer_id`, não pelo nome. Assim, nomes parecidos (Bruno Carvalho Martins / Bruno Martins) nunca se confundem.
+  - O rótulo mostra também a cidade, para o avaliador distinguir os cadastros parecidos.
   - Por baixo, a UI passa só o **telefone** do cliente escolhido para `respond()`, como o WhatsApp faria. O visitante usa um número fictício que não está no cadastro.
   - Trocar o cliente reinicia a conversa (novo `thread_id`).
 - **Painel "Dados do cliente (visão do avaliador)":** fica na sidebar, abaixo do seletor, lendo direto do banco. Mostra:
@@ -284,7 +309,7 @@ musicstore-agent/
   Serve para conferir se o agente respondeu certo. Por exemplo: a Ana pergunta pelo pedido dela e o avaliador compara a resposta com a tabela.
   - **O painel não é enviado ao modelo.** O agente só vê o que as tools retornam, e o rótulo do painel deixa isso explícito.
   - Para o visitante, o painel mostra uma dica de teste, como "experimente o pedido 14 com o e-mail de Diego Fernandes Castro". (O pedido 14 é o do Diego; o 13 é da Fernanda.)
-- **Sessão:** guarda o telefone e o `thread_id`. O agente cumprimenta pelo nome quando o cliente é identificado (seção 7.2 do manual).
+- **Sessão:** guarda o telefone e o `thread_id`. O agente cumprimenta pelo nome quando o cliente é identificado (seção 7.2 do manual). O nome chega ao modelo pelo bloco dinâmico do system prompt.
 - **Chat:** `st.chat_message` + `st.chat_input`, com um botão "Nova conversa".
 - **Sidebar:** perguntas de exemplo.
 - Um expander por resposta mostrando a decisão e o tom do input_guard, as tools usadas (args e resultado resumido) e o veredito do output_guard. Isso deixa os guardrails e a decisão "dados vs políticas" visíveis para o avaliador.
@@ -362,7 +387,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 | 6 | `feat(data): load store policies from PDF` | `policies.py` | verde |
 | 7 | `test(tools): product search and details` | bordas (96 sem estoque, 113 descontinuado, 130 em breve, promoção ativa do 94, PIX não acumula com promoção, parcelas pela regra 3.1), SQL injection, `%` escapado | vermelho |
 | 8 | `feat(tools): product search and details` | `search_products`, `get_product_details`, `list_categories` + repositório | verde |
-| 9 | `test(tools): order lookup and customer isolation` | `identify_customer` acha a Ana por "(67) 99654-7821" e por "67996547821", e um número desconhecido vira visitante; Ana vê o pedido 8 em detalhe com `is_late=true`; Ana pedindo o 13 → não encontrado; visitante com e-mail errado → negado; **ranking:** com pedidos sintéticos na fixture, a ordem é aberto > entregue recente > antigo/cancelado, com no máximo 5 no resumo e `total_orders` correto; `days_since_delivery` com `REFERENCE_DATE`; sem e-mail/telefone no retorno | vermelho |
+| 9 | `test(tools): order lookup and customer isolation` | `identify_customer` acha a Ana por "(67) 99654-7821" e por "67996547821", e um número desconhecido vira visitante; Ana vê o pedido 8 em detalhe com `is_late=true`; Ana pedindo o 14 → não encontrado; visitante com e-mail errado → negado; **cadastros parecidos:** os telefones de Bruno 11 e Bruno 43 resolvem para ids diferentes; Bruno 43 pedindo o pedido 10 (do Bruno 11) → não encontrado, mesmo informando o e-mail que os dois compartilham; visitante com pedido 10 + `bruno.martins@jmail.com` → liberado, porque o e-mail é do dono do pedido; Diego 47 pedindo o 14 (do Diego 13) → não encontrado; **ranking:** com pedidos sintéticos na fixture, a ordem é aberto > entregue recente > antigo/cancelado, com no máximo 5 no resumo e `total_orders` correto; `days_since_delivery` com `REFERENCE_DATE`; sem e-mail/telefone no retorno | vermelho |
 | 10 | `feat(tools): order lookup with customer isolation` | `identify_customer(phone)`, `get_my_orders` (ranking em SQL), injeção de `customer_id` | verde |
 | 11 | `test(guards): deterministic output guard` | R$ inventado reprova; produto não consultado reprova; valores da tool aprovam; código de rastreio inventado reprova | vermelho |
 | 12 | `feat(guards): deterministic output guard` | `output_guard` | verde |
@@ -411,6 +436,8 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 - Limitações e próximos passos:
   - Postgres (mudança isolada em `db.py`);
   - integração real com a WhatsApp Business API: um endpoint FastAPI recebe o webhook e chama `respond(phone, text)`, sem mudar o agente;
+  - **cadastro em CRM externo:** se a identificação passar a depender de uma API lenta ou paga, buscar o cadastro sob demanda ou guardar em cache por conversa, em vez de consultar a cada mensagem;
+  - **saudação proativa** ("Oi Ana! Vi que seu pedido está a caminho"): ideia de produto. Ficou de fora porque custaria uma chamada de tool em toda conversa nova, mesmo quando o cliente só quer saber um preço;
   - **perguntas complexas: caminho em degraus, decidido com dados.**
     1. medir: a taxa de reprovação no output_guard e de `safe_fallback` por tipo de pergunta, a partir do `audit_log`;
     2. subir o `effort` do Haiku para a classe de pergunta que falhar;
