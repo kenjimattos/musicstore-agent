@@ -237,6 +237,9 @@ _REQUEST_TABLES = (
     "CREATE TABLE IF NOT EXISTS support_tickets ("
     "ticket_id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, phone TEXT, order_id INTEGER, "
     "reason TEXT NOT NULL, summary TEXT NOT NULL, thread_id TEXT, created_at TEXT NOT NULL, status TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS ticket_notes ("
+    "note_id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL REFERENCES support_tickets (ticket_id), "
+    "reason TEXT NOT NULL, summary TEXT NOT NULL, thread_id TEXT, created_at TEXT NOT NULL)",
 )
 
 
@@ -271,11 +274,13 @@ def insert_data_request(customer_id: int, thread_id: str | None, requested_at: s
 
 
 def insert_ticket(*, customer_id: int | None, phone: str | None, order_id: int | None, reason: str,
-                  summary: str, thread_id: str | None, created_at: str) -> tuple[int, bool]:
-    """Abre o chamado. Devolve (ticket_id, já_existia): idempotente por (cliente ou telefone, pedido).
+                  summary: str, thread_id: str | None, created_at: str) -> tuple[int, bool, bool]:
+    """Abre o chamado. Devolve (ticket_id, já_existia, anotou): idempotente por (cliente ou telefone, pedido).
 
     O motivo fica fora da chave: uma reclamação sobre um pedido que já tem chamado aberto é o mesmo caso
-    para a equipe, e um 2º protocolo só confunde o cliente.
+    para a equipe, e um 2º protocolo só confunde o cliente. A informação nova não se perde: vira uma
+    anotação no chamado aberto (INSERT em ticket_notes), salvo se o resumo repete o do chamado ou de
+    uma anotação. O chamado original nunca é alterado.
     """
     params = {"customer_id": customer_id, "phone": phone, "order_id": order_id, "reason": reason,
               "summary": summary, "thread_id": thread_id, "created_at": created_at}
@@ -289,15 +294,27 @@ def insert_ticket(*, customer_id: int | None, phone: str | None, order_id: int |
             params,
         ).fetchone()
         if row:
+            params["ticket_id"] = row[0]
+            repeated = conn.execute(
+                "SELECT 1 FROM support_tickets WHERE ticket_id = :ticket_id AND summary = :summary "
+                "UNION ALL SELECT 1 FROM ticket_notes WHERE ticket_id = :ticket_id AND summary = :summary",
+                params,
+            ).fetchone()
+            if not repeated:
+                conn.execute(
+                    "INSERT INTO ticket_notes (ticket_id, reason, summary, thread_id, created_at) "
+                    "VALUES (:ticket_id, :reason, :summary, :thread_id, :created_at)",
+                    params,
+                )
             conn.commit()
-            return row[0], True
+            return row[0], True, not repeated
         cursor = conn.execute(
             "INSERT INTO support_tickets (customer_id, phone, order_id, reason, summary, thread_id, created_at, status) "
             "VALUES (:customer_id, :phone, :order_id, :reason, :summary, :thread_id, :created_at, 'open')",
             params,
         )
         conn.commit()
-        return cursor.lastrowid, False
+        return cursor.lastrowid, False, False
     finally:
         conn.close()
 

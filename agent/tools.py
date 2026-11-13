@@ -377,12 +377,12 @@ def escalate_to_team(reason, summary, order_id=None, *, customer_id=None, phone=
             with closing(db.connect_ro()) as conn:
                 if db.get_order(conn, order_id, customer_id) is None:
                     return {"error": NOT_FOUND}
-    ticket_id, existed = db.insert_ticket(
+    ticket_id, existed, noted = db.insert_ticket(
         customer_id=customer_id, phone=stored_phone, order_id=order_id, reason=reason, summary=summary.strip(),
         thread_id=thread_id, created_at=today().isoformat(timespec="seconds"),
     )
     return {"protocol": ticket_protocol(ticket_id), "status": "open", "return_deadline": RETURN_DEADLINE,
-            "already_open": existed}
+            "already_open": existed, "note_added": noted}
 
 
 # ---------- schemas e dispatch ----------
@@ -442,7 +442,9 @@ TOOL_SCHEMAS = [
     _schema(
         "escalate_to_team",
         "Encaminha o atendimento para a equipe (abre um chamado e devolve o protocolo e o prazo de retorno). "
-        "Use em atraso de pedido, reclamação, valor contestado ou pedido para falar com uma pessoa.",
+        "Use em atraso de pedido, reclamação, valor contestado ou pedido para falar com uma pessoa. "
+        "Se já houver chamado aberto para o mesmo pedido, não abre outro: devolve o mesmo protocolo "
+        "(`already_open`) e anota nele o resumo novo (`note_added`).",
         {
             "reason": {"type": "string", "enum": list(ESCALATION_REASONS), "description": "Motivo do chamado."},
             "summary": {"type": "string", "description": f"Resumo curto do caso, até {MAX_SUMMARY_CHARS} caracteres."},
