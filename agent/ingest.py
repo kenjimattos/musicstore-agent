@@ -7,13 +7,15 @@ Regras:
 - roda só no startup (`startup()`); consultar o banco nunca reingere;
 - por CSV, compara o mtime com o da última importação (`ingest_meta`): mais novo reingere,
   igual não faz nada, mais antigo é erro (a loja sempre cola um export novo);
-- valida tudo em memória antes de escrever; a gravação das 6 tabelas é uma única transação,
+- valida tudo em memória antes de escrever; a gravação das 6 tabelas (mais `product_specs`,
+  derivada de `products.specs`) é uma única transação,
   então um CSV ruim nunca deixa o banco pela metade;
 - só as tabelas dos CSVs (e `ingest_meta`) são recriadas: `messages`, `audit_log`,
   `data_requests` e `support_tickets` nunca são tocadas.
 """
 
 import csv
+import json
 import logging
 import math
 import sqlite3
@@ -150,6 +152,31 @@ def _normalize(text: str) -> str:
     return stripped.lower().encode("ascii", "ignore").decode("ascii")
 
 
+def _spec_rows(products: list[tuple], path_name: str) -> list[tuple]:
+    """Explode o JSON de `products.specs` em (product_id, key, value), sem acento e em minúsculas.
+
+    As chaves variam por categoria, então chave/valor guarda tudo sem colunas vazias e sem
+    funções de JSON do SQLite. JSON inválido é erro, não silêncio.
+    """
+    names = [n for n, *_ in TABLES["products"]["columns"]]
+    id_at, specs_at = names.index("product_id"), names.index("specs")
+    rows = []
+    for product in products:
+        raw = product[specs_at]
+        if raw is None:
+            continue
+        try:
+            pairs = json.loads(raw)
+            if not isinstance(pairs, dict):
+                raise ValueError("não é um objeto")
+        except ValueError as exc:
+            raise IngestError(
+                f"{path_name}, coluna specs, produto {product[id_at]}: JSON inválido ({exc})"
+            ) from None
+        rows += [(product[id_at], _normalize(str(k)), _normalize(str(v))) for k, v in pairs.items()]
+    return rows
+
+
 def _load(table: str, path: Path) -> list[tuple]:
     """Lê, valida e limpa um CSV. Devolve as linhas já na ordem das colunas da tabela."""
     spec = TABLES[table]
@@ -205,7 +232,12 @@ def _create_sql(table: str) -> str:
     return f"CREATE TABLE {table} ({', '.join(cols)})"
 
 
-def _write(conn: sqlite3.Connection, loaded: dict[str, list[tuple]], mtimes: dict[str, int]) -> None:
+def _write(
+    conn: sqlite3.Connection,
+    loaded: dict[str, list[tuple]],
+    specs: list[tuple],
+    mtimes: dict[str, int],
+) -> None:
     for table, rows in loaded.items():
         spec = TABLES[table]
         names = [n for n, *_ in spec["columns"]] + [n for n, _ in spec.get("computed", [])]
@@ -217,6 +249,13 @@ def _write(conn: sqlite3.Connection, loaded: dict[str, list[tuple]], mtimes: dic
         )
         for index, columns in spec.get("indexes", []):
             conn.execute(f"CREATE INDEX {index} ON {table} ({columns})")
+    conn.execute("DROP TABLE IF EXISTS product_specs")
+    conn.execute(
+        "CREATE TABLE product_specs (product_id INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
+        "PRIMARY KEY (product_id, key))"
+    )
+    conn.executemany("INSERT INTO product_specs (product_id, key, value) VALUES (?, ?, ?)", specs)
+    conn.execute("CREATE INDEX product_specs_key_value ON product_specs (key, value)")
     conn.execute("DROP TABLE IF EXISTS ingest_meta")
     conn.execute("CREATE TABLE ingest_meta (table_name TEXT PRIMARY KEY, mtime_ns INTEGER NOT NULL)")
     conn.executemany(
@@ -230,11 +269,12 @@ def ingest_all() -> None:
     files = find_csvs()
     mtimes = {table: path.stat().st_mtime_ns for table, path in files.items()}
     loaded = {table: _load(table, path) for table, path in files.items()}  # valida antes de escrever
+    specs = _spec_rows(loaded["products"], files["products"].name)
     conn = db.connect_rw()
     try:
         conn.execute("BEGIN")  # DDL também entra na transação: ou troca as 6 tabelas, ou nenhuma
         try:
-            _write(conn, loaded, mtimes)
+            _write(conn, loaded, specs, mtimes)
         except BaseException:
             conn.rollback()
             raise

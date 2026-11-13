@@ -192,7 +192,7 @@ def test_product_specs_can_be_filtered_by_key_and_value(store):
 
 def test_product_specs_has_an_index_on_key_and_value(store):
     ingest.ingest_all()
-    (sql,) = query(store, "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'product_specs'")[0]
+    (sql,) = query(store, "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'product_specs' AND sql IS NOT NULL")[0]
     assert "key" in sql and "value" in sql
 
 
