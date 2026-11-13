@@ -622,7 +622,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
-    { name = "pandas" },
     { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "streamlit" },
@@ -636,7 +635,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic" },
-    { name = "pandas" },
     { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "streamlit" },

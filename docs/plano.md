@@ -141,7 +141,7 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
     - **Única exceção:** a tool `request_data_deletion` (simulação de exclusão de dados). Ela chama uma função de repositório própria, que usa a conexão de escrita **só para inserir uma linha em `data_requests`**. Nenhuma tool altera `customers`, `orders`, `products` ou `promotions`.
 - **Ingestão (`agent/ingest.py`):**
   - Os CSVs continuam sendo o formato que a loja edita: export do Sheets.
-  - O ingest valida as colunas, limpa os dados e grava as tabelas (`pandas.to_sql`, replace). **Só as 5 tabelas dos CSVs** são substituídas; `messages`, `audit_log` e `data_requests` nunca são tocadas, então um novo export não apaga histórico, auditoria nem pedidos de exclusão.
+  - O ingest valida as colunas, limpa os dados e grava as tabelas com **DDL explícito e `executemany` parametrizado**, sem `pandas`: chaves primárias, índices e tipos declarados por nós, e as 6 tabelas trocadas numa **única transação** (tudo ou nada). **Só as 6 tabelas dos CSVs** (mais `ingest_meta`) são substituídas; `messages`, `audit_log`, `data_requests` e `support_tickets` nunca são tocadas, então um novo export não apaga histórico, auditoria nem pedidos de exclusão.
   - **Roda só no startup**, nunca a cada consulta: `db.connect_ro()` só abre o banco, então os dados não mudam no meio de uma conversa. Colar um CSV novo vale **na próxima inicialização do app**; o README documenta o passo "colou o CSV, reinicie".
   - **Regra do mtime, por CSV**, comparando com o mtime guardado na última importação (tabela `ingest_meta`):
     - **mais novo:** reingere;
@@ -456,7 +456,7 @@ uv run streamlit run app.py
 ```
 O uv instala o Python 3.11+ e as dependências. O README também terá a alternativa com `pip install -e .`.
 
-**Dependências:** `anthropic`, `pandas`, `streamlit`, `python-dotenv`; `pytest` e `pypdf` só em dev (o `pypdf` é usado apenas pelo teste das políticas).
+**Dependências:** `anthropic`, `streamlit`, `python-dotenv` (sem `pandas`: o ingest usa o módulo `csv` da stdlib); `pytest` e `pypdf` só em dev (o `pypdf` é usado apenas pelo teste das políticas).
 
 **Testes:**
 - `uv run pytest`: roda só os testes sem custo. O `addopts = -m "not llm and not e2e"` fica no pyproject.
