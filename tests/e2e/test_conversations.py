@@ -16,6 +16,9 @@ Rodar: `uv run pytest -m e2e` (precisa de ANTHROPIC_API_KEY).
 """
 
 import csv
+import json
+import os
+from pathlib import Path
 
 import pytest
 
@@ -102,6 +105,30 @@ def check_turn(expect: Expect, reply, label: str) -> None:
         assert "?" in text, f"deveria fazer uma pergunta{ctx}"
 
 
+def record_turn(scenario_id: str, turn: int, text: str, reply, error: str | None) -> None:
+    """Com E2E_RECORD_DIR definido, grava o turno (mensagem, resposta, trace, resultado) em JSONL.
+
+    Uma linha por turno em <dir>/<scenario>.jsonl. Serve para medir a taxa de acerto entre rodadas
+    (`scripts/e2e_report.py`) e ler as conversas depois; sem a variável, nada é gravado.
+    """
+    out = os.environ.get("E2E_RECORD_DIR")
+    if not out:
+        return
+    t = reply.trace
+    row = {
+        "scenario": scenario_id, "turn": turn, "message": text, "reply": reply.text,
+        "ok": error is None, "error": error,
+        "guard": {"category": t.guard_category, "tone": t.guard_tone, "reason": t.guard_reason, "blocked": t.blocked},
+        "tools": [{"name": c.name, "args": c.args, "result": c.result} for c in t.tool_calls],
+        "iterations": t.iterations, "output_verdict": t.output_verdict, "retries": t.retries,
+        "violations": t.violations,
+    }
+    path = Path(out) / f"{scenario_id}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+
+
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.id)
 def test_scenario(scenario, e2e_store):
     from agent.agent import respond  # import tardio: a coleta do pytest padrão não depende do agente
@@ -111,6 +138,11 @@ def test_scenario(scenario, e2e_store):
     for i, turn in enumerate(scenario.turns, start=1):
         user_texts.append(turn.text)
         reply = respond(scenario.phone, turn.text, thread_id)
-        check_turn(turn.expect, reply, f"{scenario.id} turno {i}: {turn.text}")
-        check_no_leak(reply.text, user_texts, e2e_store.data_dir)
+        try:
+            check_turn(turn.expect, reply, f"{scenario.id} turno {i}: {turn.text}")
+            check_no_leak(reply.text, user_texts, e2e_store.data_dir)
+        except AssertionError as exc:
+            record_turn(scenario.id, i, turn.text, reply, str(exc).split("\n")[0])
+            raise
+        record_turn(scenario.id, i, turn.text, reply, None)
 
