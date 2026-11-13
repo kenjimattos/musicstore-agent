@@ -89,6 +89,9 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
     - **resultados de tools de turnos anteriores viram um marcador curto** (`[resultado de consulta anterior omitido]`). Os blocos `tool_use`/`tool_result` continuam presentes, porque a API exige o par; só o conteúdo é trocado. Os resultados completos ficam só no turno atual;
     - o texto da conversa (mensagens do cliente e respostas do agente) é mantido, então "e no PIX?" continua entendendo de qual produto se fala.
   - **Consequência assumida:** para repetir preço, estoque ou status em um turno novo, o agente consulta a tool de novo. A regra vai no prompt e é coerente com o manual: nunca informar preço, estoque ou prazo sem consultar o sistema. Custo: uma ida a mais ao modelo nesses follow-ups (2 idas, dentro do limite). Em troca, o valor citado nunca é de uma consulta antiga que pode ter mudado.
+  - **Escolha de produto: a conversa não expira.** A janela é só de turnos (os 10 últimos); não há corte por tempo. No WhatsApp o `thread_id` seria o telefone, então quem volta dias depois, com outro assunto, carrega os 10 últimos turnos da conversa antiga. O que fica fora da janela continua gravado em `messages`, só como registro (auditoria e replay), e nunca volta ao contexto.
+    - **Limitação conhecida:** o modelo pode tratar o assunto novo como continuação do antigo (um "sim" lido como confirmação de um pedido antigo, por exemplo), e as mensagens não têm data no contexto. Preços citados em respostas antigas não chegam ao cliente: o output_guard os reprova, porque só vale o que veio de tool no turno atual.
+    - **Próximo passo, se isso incomodar:** expirar a thread por inatividade (`HISTORY_MAX_IDLE_HOURS`), com o `build_history` ignorando o histórico anterior ao intervalo. Nada disso entra agora.
   - **Fontes do output_guard:** resultados de tools do **turno atual** + `politicas.md`. Um valor em R$ que só aparece em resposta de turno anterior reprova e dispara o retry com feedback.
 - **Prompt caching:** o system prompt tem dois blocos.
   1. **Bloco fixo**, com `cache_control`: persona + regras + few-shot + políticas curadas. É igual para todos os clientes, então o cache vale entre conversas.
@@ -647,6 +650,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     2. subir o `effort` do Haiku para a classe de pergunta que falhar;
     3. se ainda falhar, rotear para um modelo maior com um campo `complexity` no input_guard. É roteamento de modelo (mesmo agente, só muda o `model`), não multi-agente. Custos a considerar: o cache de prompt é por modelo, o classificador pode errar a rota e o tom da persona pode mudar;
     4. exceção de negócio (negociação, reclamação complexa) vai para handoff humano.
+  - **conversa sem expiração (escolha de produto):** o histórico é por thread e limitado a 10 turnos, sem corte por tempo. Quem volta dias depois carrega os últimos turnos da conversa antiga, e o modelo pode confundir os assuntos. Em produção, expirar a thread por inatividade (`HISTORY_MAX_IDLE_HOURS`);
   - **escala de pedidos:**
     - filtros em `get_my_orders` (`product`, `status`, `since`), quando os clientes tiverem histórico longo;
     - índice em `orders(customer_id, order_date)`;

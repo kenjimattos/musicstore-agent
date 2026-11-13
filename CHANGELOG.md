@@ -45,3 +45,4 @@ sequence of decisions and corrections stays readable.
 31. **Changed:** changelog entries are listed in chronological order instead of grouped by type.
 32. **Added:** deterministic output guard: amounts, products, codes, contacts, dates, deadlines, stock and percentages must come from this turn's tool results or the policies.
 33. **Test:** history window (last 10 customer turns, cut at a user message, old tool results replaced by a marker, current turn intact); red until the implementation lands.
+34. **Docs:** plan records that the conversation does not expire (history limited to 10 turns, no idle cutoff) as a product choice, with its limitation.
