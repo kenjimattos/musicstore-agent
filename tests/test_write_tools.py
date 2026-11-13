@@ -14,8 +14,7 @@ Interface esperada (commit 10c). Toda tool devolve um dict; erro vira `{"error":
         # idempotente por (cliente ou telefone, pedido): com chamado aberto para o pedido, devolve o mesmo
         # protocolo, qualquer que seja o motivo, e anota nele o resumo novo (note_added), se for diferente
 
-    tools.customer_protocols(*, customer_id=None, phone=None) -> ["ATD-000001", "LGPD-000001", ...]
-        # protocolos do próprio cliente (chamados e pedidos de exclusão); fonte do output_guard
+    (protocolos do cliente como fonte do output_guard: ver test_known_identifiers.py)
 
     tools.dispatch(name, args, *, customer_id=None, phone=None, thread_id=None) -> dict
     tools.TOOL_SCHEMAS -> [{"name", "description", "input_schema"}, ...]
@@ -242,28 +241,6 @@ def test_another_order_opens_another_ticket(ready):
     other = escalate(order_id=None, reason="outro", summary="Dúvida sobre garantia.")
     assert other["protocol"] != first["protocol"]
     assert len(query("SELECT * FROM support_tickets")) == 2
-
-
-# ---------- protocolos do cliente (fonte do output_guard em turnos seguintes) ----------
-
-
-def test_customer_protocols_lists_tickets_and_deletion_requests(ready):
-    ticket = escalate()
-    request = tools.request_data_deletion(customer_id=ANA, thread_id="t1")
-    assert set(tools.customer_protocols(customer_id=ANA)) == {ticket["protocol"], request["protocol"]}
-
-
-def test_customer_protocols_never_lists_someone_elses(ready):
-    escalate()  # chamado da Ana
-    tools.escalate_to_team("outro", "Quer falar com uma pessoa.", None, customer_id=None,
-                           phone=VISITOR_PHONE, thread_id="t9")
-    assert tools.customer_protocols(customer_id=DIEGO_13) == []
-    visitor = tools.customer_protocols(customer_id=None, phone=VISITOR_PHONE)
-    assert len(visitor) == 1 and visitor != tools.customer_protocols(customer_id=ANA)
-
-
-def test_customer_protocols_of_unknown_visitor_is_empty(ready):
-    assert tools.customer_protocols(customer_id=None, phone=None) == []
 
 
 def test_customer_cannot_escalate_someone_elses_order(ready):

@@ -186,15 +186,45 @@ def test_protocol_without_tool_call_fails(pol):
     assert_blocked(check("Seu protocolo é ATD-000001.", [], pol), "ATD-000001")
 
 
-# protocolos são identificadores duráveis: o de um turno anterior vale se for do próprio cliente
+# ---------- identificadores duráveis do cliente (`known`, de tools.known_identifiers) ----------
+# Número do pedido, rastreio e protocolo do próprio cliente valem em qualquer turno; o volátil
+# (preço, estoque, status, atraso) continua exigindo consulta no turno.
+
+KNOWN_ANA = {"protocols": ["ATD-000001"], "orders": [8], "tracking": ["BRJL5544332BR"]}
+
+
+def check_known(text, pol, known=KNOWN_ANA):
+    return guards.output_guard(text, [], pol, known=known)
+
+
 def test_customers_protocol_from_an_earlier_turn_passes(pol):
-    verdict = guards.output_guard("Seu chamado ATD-000001 continua aberto.", [], pol, protocols=["ATD-000001"])
-    assert verdict.ok
+    assert check_known("Seu chamado ATD-000001 continua aberto.", pol).ok
 
 
 def test_protocol_not_among_the_customers_fails(pol):
-    verdict = guards.output_guard("Seu chamado é o ATD-000002.", [], pol, protocols=["ATD-000001"])
-    assert_blocked(verdict, "ATD-000002")
+    assert_blocked(check_known("Seu chamado é o ATD-000002.", pol), "ATD-000002")
+
+
+def test_customers_order_number_from_an_earlier_turn_passes(pol):
+    assert check_known("Registrei sua reclamação sobre o pedido 8.", pol).ok
+
+
+def test_order_number_not_among_the_customers_fails(pol):
+    assert_blocked(check_known("Seu pedido 14 está a caminho.", pol), "14")
+
+
+def test_customers_tracking_code_from_an_earlier_turn_passes(pol):
+    assert check_known("O código de rastreio é BRJL5544332BR.", pol).ok
+
+
+def test_tracking_code_not_among_the_customers_fails(pol):
+    assert_blocked(check_known("O código de rastreio é BRXX1234567BR.", pol), "BRXX1234567BR")
+
+
+def test_volatile_facts_still_need_a_query_this_turn(pol):
+    # o pedido 8 é conhecido, mas total, atraso e data não: podem ter mudado
+    verdict = check_known("O pedido 8 custou R$ 349,90 e está 25 dias atrasado desde 28/02.", pol)
+    assert_blocked(verdict, "349,90", "25 dias", "28/02")
 
 
 # ---------- contatos ----------
