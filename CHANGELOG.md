@@ -77,3 +77,4 @@ sequence of decisions and corrections stays readable.
 2. O e-mail") is not read as order 2; order numbers on the same line are still checked. Red until the fix lands.
 63. **Fixed:** output guard order-number pattern no longer crosses a line break, so a numbered list after "pedido" is not flagged as an invented order.
 64. **Fixed:** defect after 30 days: the agent opens the ticket in the first message (without asking for the order first), says the exchange is done by the manufacturer and that its deadline depends on the manufacturer, and asks for the order number and a description to complete the ticket. The e2e report lists only scenarios that ran.
+65. **Fixed:** with a ticket already open, when the customer insists, complains again or brings new information, the agent calls `escalate_to_team` again so it is recorded as a note on the same ticket.
