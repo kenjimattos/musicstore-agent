@@ -4,7 +4,18 @@ import csv
 from pathlib import Path
 
 from tests.e2e.helpers import brl_values, digits, norm
-from tests.e2e.scenarios import ANA, EXTRA_ORDER_ITEMS, EXTRA_ORDERS, GUSTAVO, LUCAS, PEDRO, SCENARIOS, VISITOR
+from tests.e2e.scenarios import (
+    ANA,
+    CAMILA,
+    EXTRA_ORDER_ITEMS,
+    EXTRA_ORDERS,
+    GUSTAVO,
+    JULIANA,
+    LUCAS,
+    PEDRO,
+    SCENARIOS,
+    VISITOR,
+)
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 
@@ -26,6 +37,8 @@ def test_phones_match_the_intended_customers():
     assert by_phone[digits(PEDRO)].startswith("Pedro Henrique")
     assert by_phone[digits(LUCAS)].startswith("Lucas Mendes")
     assert by_phone[digits(GUSTAVO)].startswith("Gustavo Teixeira")
+    assert by_phone[digits(JULIANA)].startswith("Juliana Almeida")
+    assert by_phone[digits(CAMILA)].startswith("Camila Duarte")
     assert digits(VISITOR) not in by_phone
 
 
@@ -50,6 +63,14 @@ def test_visitor_flow_uses_the_real_owner_of_order_14():
     owner = customers[{r["order_id"]: r for r in rows("orders.csv")}["14"]["customer_id"]]
     assert owner["email"] == "diego.castro@coldmail.com"
     assert any(c["email"] == "diego.castro@jmail.com" for c in customers.values())  # o homônimo existe
+
+
+def test_escalation_scenarios_use_the_intended_orders():
+    orders = {r["order_id"]: r for r in rows("orders.csv")}
+    customers = {r["customer_id"]: r for r in rows("customers.csv")}
+    ids = {name: customers[orders[n]["customer_id"]]["phone"] for name, n in (("late", "9"), ("pending", "16"))}
+    assert digits(ids["late"]) == digits(JULIANA) and orders["9"]["status"] == "confirmed"
+    assert digits(ids["pending"]) == digits(CAMILA) and orders["16"]["status"] == "pending"
 
 
 def test_brl_parser_and_norm():
