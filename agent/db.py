@@ -335,6 +335,12 @@ def customer_request_ids(conn, customer_id: int | None, phone: str | None) -> tu
     return [r[0] for r in tickets], [r[0] for r in requests]
 
 
+def customer_order_codes(conn, customer_id: int) -> list[tuple[int, str | None]]:
+    """(order_id, tracking_code) de todos os pedidos do cliente."""
+    return [tuple(r) for r in conn.execute(
+        "SELECT order_id, tracking_code FROM orders WHERE customer_id = ? ORDER BY order_id", (customer_id,))]
+
+
 def open_ticket_in_thread(conn, thread_id: str) -> int | None:
     row = conn.execute("SELECT ticket_id FROM support_tickets WHERE status = 'open' AND thread_id = ? "
                        "ORDER BY ticket_id LIMIT 1", (thread_id,)).fetchone()

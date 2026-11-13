@@ -226,7 +226,7 @@ def respond(phone: str, text: str, thread_id: str) -> Reply:
         if answer is None:  # limite de iterações: nunca uma resposta pela metade
             break
         verdict = guards.output_guard(answer, turn_results, policies.load_policies(),
-                                      protocols=tools.customer_protocols(customer_id=customer_id, phone=phone))
+                                      known=tools.known_identifiers(**identity))
         if verdict.ok:
             trace.output_verdict = "approved"
             return Reply(answer, trace)

@@ -349,13 +349,49 @@ def deletion_protocol(request_id: int) -> str:
     return f"LGPD-{request_id:06d}"
 
 
-def customer_protocols(*, customer_id=None, phone=None) -> list[str]:
-    """Protocolos do próprio cliente (chamados e pedidos de exclusão). Não é tool do modelo: é fonte do
-    output_guard, porque um protocolo dado num turno anterior continua válido (é um identificador, não um
-    dado que muda como preço ou estoque)."""
+def _verified_in_thread(thread_id) -> list[tuple[int, str | None]]:
+    """(order_id, tracking_code) dos pedidos que get_my_orders devolveu nesta conversa (visitante verificado).
+
+    Lê só resultados de get_my_orders gravados em `messages`; texto do cliente e outras tools não contam.
+    """
+    if thread_id is None:
+        return []
+    messages = db.load_messages(thread_id)
+    calls = {b["id"] for m in messages if m["role"] == "assistant" and isinstance(m["content"], list)
+             for b in m["content"] if b.get("type") == "tool_use" and b.get("name") == "get_my_orders"}
+    found = []
+    for message in messages:
+        if message["role"] != "user" or not isinstance(message["content"], list):
+            continue
+        for block in message["content"]:
+            if block.get("type") != "tool_result" or block.get("tool_use_id") not in calls:
+                continue
+            try:
+                result = json.loads(block["content"])
+            except (TypeError, ValueError):
+                continue
+            order = result.get("order") if isinstance(result, dict) else None
+            if isinstance(order, dict) and isinstance(order.get("order_id"), int):
+                found.append((order["order_id"], order.get("tracking_code")))
+    return found
+
+
+def known_identifiers(*, customer_id=None, phone=None, thread_id=None) -> dict:
+    """Identificadores duráveis do próprio cliente: fonte do output_guard em qualquer turno.
+
+    Não é tool do modelo. Número do pedido, rastreio e protocolo não mudam durante a conversa, então podem
+    ser repetidos sem nova consulta; preço, estoque, status e atraso mudam e não entram. Tudo vem do banco:
+    cliente identificado, os pedidos dele; visitante, só o pedido verificado nesta conversa.
+    """
     with closing(db.connect_ro()) as conn:
         tickets, requests = db.customer_request_ids(conn, customer_id, phone)
-    return [ticket_protocol(t) for t in tickets] + [deletion_protocol(r) for r in requests]
+        codes = db.customer_order_codes(conn, customer_id) if customer_id is not None else []
+    if customer_id is None:
+        codes = _verified_in_thread(thread_id)
+    orders = sorted({o for o, _ in codes})
+    tracking = sorted({t for _, t in codes if t})
+    return {"protocols": [ticket_protocol(t) for t in tickets] + [deletion_protocol(r) for r in requests],
+            "orders": orders, "tracking": tracking}
 
 
 def escalate_to_team(reason, summary, order_id=None, *, customer_id=None, phone=None, thread_id=None) -> dict:
