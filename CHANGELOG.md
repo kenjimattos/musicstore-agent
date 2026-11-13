@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Order lookup tool with customer isolation: a visitor sees only the verified order.
 - Simulated write tools: data deletion request (LGPD) and escalation to the team.
 - Acceptance scenarios (e2e) for the prompt rules.
+- Tests for the deterministic output guard (amounts, products, codes, contacts, dates, stock, percentages); red until the implementation lands.
 
 ### Fixed
 
