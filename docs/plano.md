@@ -551,6 +551,9 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     - todo `tool_use` da requisição tem seu `tool_result` (o corte não quebra o par);
     - o preço citado no último turno é o do banco, vindo de uma consulta do próprio turno (`search_products` chamada de novo), e não o de uma consulta antiga;
     - o tamanho da requisição (tokens estimados) não cresce de forma linear com o número de turnos.
+  - **conversa antiga retomada** (`test_stale_thread`, e2e, é uma **medição**, não uma garantia): mede o que o modelo faz quando o cliente volta a uma thread sem expiração (ver "Escolha de produto: a conversa não expira"). O cenário grava na thread uma conversa antiga em que o agente pediu a confirmação da exclusão de dados e o cliente nunca respondeu; depois chega uma mensagem solta e ambígua. Variações: "sim", "e o preço?" e uma saudação ("Oi, bom dia!").
+    - **Esperado:** com a saudação, o agente recomeça e não menciona a exclusão. Com "sim" solto, o ideal é pedir esclarecimento em vez de registrar a exclusão; o teste só **registra** se `request_data_deletion` foi chamada, sem falhar o build.
+    - **Uso do resultado:** se o modelo continuar o assunto antigo com frequência, isso justifica implementar `HISTORY_MAX_IDLE_HOURS`, o próximo passo já registrado.
   - **os testes unitários da `build_history`** (sem LLM, no `pytest` padrão): janela de 10 turnos, corte sempre em mensagem do usuário, `tool_result` antigo trocado pelo marcador e `tool_result` do turno atual intacto.
 - **`test_ui.py`:** usa o Streamlit AppTest (`streamlit.testing.v1`), que é headless, leve e sem Playwright nem navegador. Verifica que:
   - selecionar um cliente na sidebar faz o agente cumprimentá-lo pelo nome;
