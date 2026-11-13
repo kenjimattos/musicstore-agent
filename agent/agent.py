@@ -234,7 +234,9 @@ def respond(phone: str, text: str, thread_id: str) -> Reply:
         if attempt == 0:
             trace.retries += 1
             feedback = ("Sua resposta foi reprovada na verificação de fatos:\n- " + "\n- ".join(verdict.violations)
-                        + "\nRefaça a resposta ao cliente: consulte a ferramenta ou remova o que não tem fonte.")
+                        + "\nRefaça a resposta ao cliente: consulte a ferramenta ou remova o que não tem fonte. "
+                        "O cliente NÃO viu a resposta reprovada: escreva a mensagem de novo, do zero, sem pedir "
+                        "desculpas por erro, sem falar em correção nem em verificação.")
             content = [{"type": "text", "text": feedback}]  # lista: não conta como nova pergunta do cliente
             messages.append({"role": "user", "content": content})
             db.save_message(thread_id, "user", content)
