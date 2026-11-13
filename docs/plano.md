@@ -137,10 +137,11 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
   - **Argumentos validados em Python antes da query:** `order_id` precisa ser int, preços precisam ser float ≥ 0, e strings têm tamanho máximo. Se o modelo mandar algo inválido, a tool devolve um erro claro.
   - **Identificadores nunca vêm do usuário:** colunas e `ORDER BY` são fixos. Categoria é resolvida por lookup de nome → id.
   - **`LIKE` com wildcards escapados:** `%` e `_` vindos do usuário são escapados (`ESCAPE '\'`), para não virarem coringas.
-  - **Defesa em profundidade:** as tools usam uma conexão somente leitura (`file:store.db?mode=ro`, com `uri=True`). Mesmo que algo escapasse, o banco não pode ser alterado por elas. Escrita (ingest, histórico, auditoria) usa outra conexão, que o agente não alcança.
+  - **Defesa em profundidade:** as tools de consulta usam uma conexão somente leitura (`file:store.db?mode=ro`, com `uri=True`). Mesmo que algo escapasse, o banco não pode ser alterado por elas. Escrita (ingest, histórico, auditoria) usa outra conexão, que o agente não alcança.
+    - **Única exceção:** a tool `request_data_deletion` (simulação de exclusão de dados). Ela chama uma função de repositório própria, que usa a conexão de escrita **só para inserir uma linha em `data_requests`**. Nenhuma tool altera `customers`, `orders`, `products` ou `promotions`.
 - **Ingestão (`agent/ingest.py`):**
   - Os CSVs continuam sendo o formato que a loja edita: export do Sheets.
-  - O ingest valida as colunas, limpa os dados e grava as tabelas (`pandas.to_sql`, replace).
+  - O ingest valida as colunas, limpa os dados e grava as tabelas (`pandas.to_sql`, replace). **Só as 5 tabelas dos CSVs** são substituídas; `messages`, `audit_log` e `data_requests` nunca são tocadas, então um novo export não apaga histórico, auditoria nem pedidos de exclusão.
   - Roda no startup e sempre que o mtime de algum CSV for mais novo que a última importação. A checagem é barata e roda a cada consulta, o que preserva o "colar o CSV novo e pronto".
   - **É um adaptador de protótipo, e o README diz isso explicitamente.** Em produção, o `ingest.py` é substituído de uma destas formas:
     - pela leitura direta do sistema da loja (ERP ou e-commerce), via réplica de leitura ou API;
@@ -183,7 +184,7 @@ Princípio: **todo fato verificável na resposta precisa ter uma fonte**. As fon
      - Para não haver conta feita "de cabeça", as tools já devolvem os valores derivados: preço promocional, preço no PIX e parcelamento máximo permitido com o valor da parcela, seguindo as regras da seção 3.1 do manual.
      - Assim, qualquer R$ calculado pelo LLM reprova.
    - **Nomes de produto do catálogo:** se a resposta menciona um produto, ele precisa ter vindo de uma tool. Isso impede sugerir ou recomendar produto sem consulta.
-   - **Códigos de rastreio (`BR…BR`), números de pedido, quantidades de estoque, telefones e e-mails:** precisam existir nas fontes.
+   - **Códigos de rastreio (`BR…BR`), números de pedido, números de protocolo de exclusão de dados (`LGPD-…`), quantidades de estoque, telefones e e-mails:** precisam existir nas fontes.
    - **Percentuais de desconto:** precisam vir de promoção ativa ou do PIX (5%).
 2. **Se reprovar:** volta ao loop do agente com feedback objetivo ("o valor R$ 1.850,00 não aparece em nenhuma consulta; consulte a tool ou remova"), com 1 retry. Se reprovar de novo, o `safe_fallback` responde: "não consegui confirmar essa informação, vou encaminhar para a equipe" + telefone da loja.
 3. **O que o determinístico não pega:** alucinação puramente semântica sem número nem nome, como uma regra inventada em texto livre. Isso é coberto por:
@@ -192,7 +193,7 @@ Princípio: **todo fato verificável na resposta precisa ter uma fonte**. As fon
 4. **Suposição a documentar sobre "não sugerir nada":** sugestões de produto só são permitidas quando vêm de tool. O conhecimento musical geral da persona orienta a conversa, mas nunca vira afirmação sobre a loja. Exemplo: alternativas para um produto sem estoque, que o próprio manual pede na seção 7.3. O manual também manda "sugerir lojas parceiras", mas não há lista delas, então o agente não sugere nenhuma.
 
 ### Dados e permissões (impostos em código, não no prompt)
-- **Todas as tools são somente leitura.** Pelo agente, não existe como alterar preço, estoque ou pedido.
+- **As tools de consulta são somente leitura.** Pelo agente, não existe como alterar preço, estoque ou pedido. A única escrita é o registro de um pedido de exclusão de dados, em tabela própria (ver "Exclusão de dados (LGPD), simulada").
 - **A identidade vem do código, nunca do LLM.**
   - O `customer_id`, resolvido pelo código a partir do telefone que chega com a mensagem, é injetado pelo dispatcher nas tools de pedido. Ele não aparece no JSON Schema, então o modelo não tem como preencher ou trocar esse valor.
   - Nem um prompt injection bem-sucedido consegue consultar o pedido de outra pessoa.
@@ -202,6 +203,31 @@ Princípio: **todo fato verificável na resposta precisa ter uma fonte**. As fon
 - **Dados mínimos nas respostas das tools:** só o primeiro nome do cliente, nunca e-mail nem telefone.
 - **Trocar o cliente no seletor abre uma conversa nova (novo `thread_id`).** Assim, o histórico de uma pessoa não vaza para outra.
 - **Descontos:** só os que vêm de `promotions.csv` (ativas) e do PIX (manual).
+
+### Exclusão de dados (LGPD), simulada
+O manual (seção 9) diz que o cliente pode pedir a exclusão dos seus dados pelo WhatsApp ou e-mail, então o agente precisa tratar esse pedido. **No protótipo, é uma simulação: o pedido é registrado e nenhum dado é apagado.**
+
+- **Tool `request_data_deletion()`, sem argumentos do modelo.** O `customer_id` é injetado pelo código, como nas tools de pedido.
+  - Insere uma linha em `data_requests` (`request_id`, `customer_id`, `thread_id`, `requested_at`, `status = 'pending'`) e devolve um **protocolo** (`LGPD-000012`).
+  - **Idempotente:** se o cliente já tem um pedido pendente, devolve o protocolo existente em vez de criar outro.
+  - **Não altera nem lê** `customers`, `orders` nem `messages`.
+- **Só para cliente identificado pelo telefone.** Visitante recebe uma orientação: o pedido precisa ser feito pelo número cadastrado, ou por e-mail à loja.
+  - **Por que não aceitar e-mail digitado no chat, como acontece com pedidos:** qualquer pessoa poderia pedir a exclusão dos dados de outra. A identidade pelo canal é a única prova aceita.
+- **Confirmação antes de registrar (regra no prompt, verificada no e2e):** o agente pergunta se o cliente quer mesmo prosseguir, em tom claro e sem brincadeira, e só chama a tool depois de um "sim" explícito.
+  - Não dá para o código provar que houve confirmação, então a regra fica no prompt e no teste.
+  - O risco é baixo porque o pedido só **registra** uma solicitação que a equipe trata, e ela pode ser cancelada.
+- **O que o agente diz e não diz:**
+  - diz que o pedido foi registrado, o protocolo, e que a equipe vai tratar e entrar em contato;
+  - **não promete prazo nem confirma que os dados foram apagados**, porque o manual não traz prazo e porque nada foi apagado;
+  - **não promete apagar tudo:** a seção 9 lista o cumprimento de obrigações legais e fiscais entre os usos dos dados, então alguns registros (como pedidos) podem precisar ser mantidos. O agente fala em "tratar o pedido", não em "apagar tudo";
+  - **não confirma por qual canal responderá**, só que a equipe entrará em contato.
+- **Output guard:** o número de protocolo passa a ser mais um código que só pode aparecer se vier do resultado da tool do turno.
+- **Auditoria:** o pedido aparece no `audit_log` como qualquer tool chamada, e `data_requests` guarda o histórico.
+- **Painel do avaliador:** mostra as solicitações de exclusão do cliente selecionado (protocolo, data, status) e deixa explícito que **os dados continuam no banco**, por ser uma simulação.
+- **Em produção (README, limitações):** a exclusão real passaria por uma fila tratada pela equipe, com verificação de identidade, e cobriria mais que `customers`:
+  - `messages` e `audit_log` guardam dados pessoais da conversa;
+  - pedidos com obrigação fiscal seriam anonimizados, não apagados;
+  - um novo export de CSV recriaria o cliente apagado, então a exclusão precisa acontecer no sistema de origem.
 
 ### Auditoria
 A tabela `audit_log` no mesmo banco registra uma linha por turno com:
@@ -285,6 +311,9 @@ musicstore-agent/
      - `is_late`: previsão de entrega já passou e o pedido ainda não foi entregue.
    - O `customer_id` vem do telefone e é injetado pelo código; nunca é argumento do modelo.
 4. `list_categories()`: lista as categorias com contagem de produtos ativos, incluindo as vazias.
+5. `request_data_deletion()`: registra um pedido de exclusão de dados (**simulação**, nada é apagado). Sem argumentos; só para cliente identificado; idempotente. Detalhes em "Exclusão de dados (LGPD), simulada".
+
+**Regra no prompt para exclusão de dados:** reconhecer o pedido com seriedade, explicar em uma frase o que será registrado, pedir confirmação explícita e só então chamar a tool. Nunca prometer prazo nem que tudo será apagado.
 
 **Regra no prompt para pedidos:**
 - **Ação com consequência** (devolução, troca, reclamação) e mais de um pedido relevante: confirmar qual pedido antes de aplicar a política.
@@ -353,7 +382,8 @@ musicstore-agent/
   - Trocar o cliente reinicia a conversa (novo `thread_id`).
 - **Painel "Dados do cliente (visão do avaliador)":** fica na sidebar, abaixo do seletor, lendo direto do banco. Mostra:
   - nome, telefone, e-mail e cidade;
-  - uma tabela com os pedidos do cliente: id, data, status, total, itens, rastreio e previsão de entrega.
+  - uma tabela com os pedidos do cliente: id, data, status, total, itens, rastreio e previsão de entrega;
+  - as **solicitações de exclusão de dados** do cliente (protocolo, data, status), com o aviso de que os dados continuam no banco, por ser uma simulação.
 
   Serve para conferir se o agente respondeu certo. Por exemplo: a Ana pergunta pelo pedido dela e o avaliador compara a resposta com a tabela.
   - **O painel não é enviado ao modelo.** O agente só vê o que as tools retornam, e o rótulo do painel deixa isso explícito.
@@ -407,6 +437,12 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     - Por isso a fixture do teste insere pedidos extras **só na cópia temporária dos CSVs**, sem alterar `data/`. (Na cópia e não no banco, porque o re-ingest por mtime apagaria linhas inseridas direto no banco.)
     - A mesma fixture cobre o "sim, pode devolver": um pedido entregue há 3 dias. Nenhum pedido real cai na janela de 7 dias na `REFERENCE_DATE`.
   - a memória: "e no PIX?" no 2º turno é respondido sem repetir o nome do produto.
+  - **a exclusão de dados (simulada):**
+    - Ana escreve "quero que vocês apaguem meus dados". O agente **pergunta se ela confirma, sem chamar a tool** (o `trace` do turno não tem `request_data_deletion`). Com "sim", chama a tool **uma vez**, responde com o protocolo e **não promete prazo nem que tudo será apagado**;
+    - os dados da Ana continuam no banco depois do pedido, e a resposta não diz que foram apagados;
+    - um pedido repetido ("pode apagar meus dados" de novo) devolve o mesmo protocolo;
+    - um visitante pede a exclusão: nenhuma linha é criada, e o agente orienta pelo canal certo;
+    - Ana pede "apaguem os dados do Diego": recusa, sem tool de escrita no `trace`. Nenhuma tool aceita `customer_id` do modelo.
   - **a política de histórico** (`test_long_conversation`, e2e): uma conversa de 12 turnos em que o cliente explora o catálogo (Takamine GD20, Taylor 110e, um violão de nylon, outro de aço…) e, no fim, volta a perguntar o preço de um produto do começo. O teste confere que:
     - a requisição enviada ao modelo no último turno contém no máximo os 10 turnos mais recentes e **nenhum `tool_result` completo de turno anterior**, só o marcador;
     - todo `tool_use` da requisição tem seu `tool_result` (o corte não quebra o par);
@@ -444,6 +480,8 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 | 8 | `feat(tools): product search and details` | `search_products`, `get_product_details`, `list_categories` + repositório | verde |
 | 9 | `test(tools): order lookup and customer isolation` | `identify_customer` acha a Ana por "(67) 99654-7821" e por "67996547821", e um número desconhecido vira visitante; Ana vê o pedido 8 em detalhe com `is_late=true`; Ana pedindo o 14 → não encontrado; visitante com e-mail errado → negado; **cadastros parecidos:** os telefones de Bruno 11 e Bruno 43 resolvem para ids diferentes; Bruno 43 pedindo o pedido 10 (do Bruno 11) → não encontrado, mesmo informando o e-mail que os dois compartilham; visitante com pedido 10 + `bruno.martins@jmail.com` → liberado, porque o e-mail é do dono do pedido; Diego 47 pedindo o 14 (do Diego 13) → não encontrado; **ranking:** com pedidos sintéticos na fixture, a ordem é aberto > entregue recente > antigo/cancelado, com no máximo 5 no resumo e `total_orders` correto; `days_since_delivery` com `REFERENCE_DATE`; sem e-mail/telefone no retorno | vermelho |
 | 10 | `feat(tools): order lookup with customer isolation` | `identify_customer(phone)`, `get_my_orders` (ranking em SQL), injeção de `customer_id` | verde |
+| 10b | `test(tools): simulated data deletion request` | `request_data_deletion` para a Ana cria uma linha em `data_requests` com status `pending` e devolve protocolo; **os dados dela não mudam** (`customers`, `orders` e `messages` idênticos antes e depois); segunda chamada devolve o mesmo protocolo (idempotente); visitante → orientação, sem escrever nada; o `customer_id` não está no JSON Schema da tool; as consultas continuam na conexão somente leitura (escrever por ela falha); re-ingest de CSV não apaga `data_requests`. Também entra em `scenarios.py` o cenário e2e de exclusão. Sub-passo de TDD sem renumerar a tabela | vermelho |
+| 10c | `feat(tools): simulated data deletion request` | tabela `data_requests`, função de repositório com a conexão de escrita (só `INSERT`), `request_data_deletion` + schema + dispatch | verde |
 | 11 | `test(guards): deterministic output guard` | R$ inventado reprova; produto não consultado reprova; valores da tool aprovam; código de rastreio inventado reprova | vermelho |
 | 12 | `feat(guards): deterministic output guard` | `output_guard` | verde |
 | 12b | `test(agent): history window` | `tests/test_history.py`: janela de 10 turnos, corte sempre em mensagem do usuário (sem separar `tool_use` de `tool_result`), `tool_result` antigo trocado pelo marcador, `tool_result` do turno atual intacto. Sem LLM. (Sub-passo de TDD sem renumerar a tabela.) | vermelho |
@@ -476,7 +514,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     - produto não consultado → reprova;
     - preço vindo da tool → aprova;
     - valor do PIX ou da parcela vindo da tool → aprova.
-- `uv run pytest -m llm` (`test_input_guard.py`): cerca de 10 casos adversariais de entrada, com bloqueio esperado no input_guard. Mais 3 casos de tom: um neutro, um irritado e um com pressa.
+- `uv run pytest -m llm` (`test_input_guard.py`): cerca de 10 casos adversariais de entrada, com bloqueio esperado no input_guard. Mais 3 casos de tom: um neutro, um irritado e um com pressa. Mais um caso de **pedido de exclusão de dados**, que precisa ser `in_scope` (assunto de privacidade da loja), e não ser barrado como fora do escopo nem como manipulação.
 - `uv run pytest -m e2e`: conversas ponta a ponta + UI (detalhes na seção "Testes e2e").
 - `uv run python scripts/generate_examples.py`: revisar os transcripts e a tabela `audit_log`.
 - Teste manual no Streamlit.
@@ -486,7 +524,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 - Arquitetura (diagrama do fluxo).
 - Decisões de produto (canal WhatsApp: identidade pelo número, estilo de mensagem).
 - Decisões técnicas.
-- Guardrails e segurança, incluindo proteção de dados de clientes (LGPD).
+- Guardrails e segurança, incluindo proteção de dados de clientes (LGPD) e a **simulação de exclusão de dados**: o que ela registra, o que não faz e por quê.
 - Como atualizar políticas e dados, incluindo o aviso de que os testes de aceite são ancorados nos dados entregues (seção "Testes e2e").
   - **Políticas:** editar `data/politicas.md`. Um PDF novo da loja precisa de curadoria antes de valer, com o que fica, o que sai e as contradições resolvidas.
 - **Precedência das fontes:** os CSVs (sistema da loja) prevalecem sobre o manual para dados como promoções, preços e estoque; o manual vale para regras e procedimentos. Inclui a tabela de quem prevalece em cada tipo de informação.
@@ -495,6 +533,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 - Tratamento de dados e suposições.
 - Limitações e próximos passos:
   - Postgres (mudança isolada em `db.py`);
+  - **exclusão de dados real (LGPD):** hoje é só o registro do pedido. Em produção, uma fila tratada pela equipe, com verificação de identidade, cobrindo também `messages` e `audit_log`, anonimizando pedidos com obrigação fiscal e apagando no sistema de origem, porque um novo export de CSV recriaria o cliente;
   - integração real com a WhatsApp Business API: um endpoint FastAPI recebe o webhook e chama `respond(phone, text)`, sem mudar o agente;
   - **cadastro em CRM externo:** se a identificação passar a depender de uma API lenta ou paga, buscar o cadastro sob demanda ou guardar em cache por conversa, em vez de consultar a cada mensagem;
   - **saudação proativa** ("Oi Ana! Vi que seu pedido está a caminho"): ideia de produto. Ficou de fora porque custaria uma chamada de tool em toda conversa nova, mesmo quando o cliente só quer saber um preço;
@@ -522,7 +561,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     | Tema | Proposta inicial | Questionamento | Decisão final |
     |---|---|---|---|
     | Tools de pedido | `list_my_orders` + `get_order_status` (lista + detalhe) | "A tabela é pequena, por que separar?" A separação custava uma ida extra ao modelo no caso mais comum. "E se trouxer só o último pedido?" "E quando a base crescer?" | Uma tool `get_my_orders`, com ranking em SQL (aberto > entregue recente > resto), o 1º em detalhe, até 5 resumidos e `total_orders` |
-    | Orquestração | LangGraph (StateGraph) | Overengineering para o problema: 4 tools e um fluxo linear (guard → agente → guard) cabem num loop de ~40 linhas; o framework adicionaria abstração sem resolver nada que o código simples não resolva | Loop explícito com o SDK `anthropic`, com o fluxo separado em etapas, pronto para virar grafo se a orquestração crescer (multi-agente, handoff humano) |
+    | Orquestração | LangGraph (StateGraph) | Overengineering para o problema: 5 tools e um fluxo linear (guard → agente → guard) cabem num loop de ~40 linhas; o framework adicionaria abstração sem resolver nada que o código simples não resolva | Loop explícito com o SDK `anthropic`, com o fluxo separado em etapas, pronto para virar grafo se a orquestração crescer (multi-agente, handoff humano) |
     | Guard de saída | Juiz LLM | Custo de uma chamada extra por turno | Checagem determinística de fatos (R$, produtos, códigos), com as tools devolvendo os valores já calculados |
     | Banco | CSVs em memória → SQLAlchemy | Migração futura para banco; "precisa de SQLAlchemy?" | `sqlite3` + padrão de repositório + queries parametrizadas e conexão somente leitura nas tools |
     | Modelo | Sonnet no agente, Haiku no guard | Economia de tokens | Haiku em tudo, viabilizado por tools que fazem as contas e pelo guard determinístico |
