@@ -302,7 +302,8 @@ def get_my_orders(order_id=None, email_or_phone=None, *, customer_id=None) -> di
                 return {"error": "Para consultar um pedido, informe o número do pedido e o e-mail ou telefone do cadastro."}
             if not _owns(conn, order_id, email_or_phone):
                 return {"error": NOT_FOUND}
-            return {"total_orders": 1, "order": _order_detail(conn, db.get_order(conn, order_id), now), "other_orders": []}
+            # só o pedido verificado: sem total nem lista, para não revelar quantos pedidos o dono tem
+            return {"order": _order_detail(conn, db.get_order(conn, order_id), now)}
         if order_id is not None:
             order = db.get_order(conn, order_id, customer_id)
             if order is None:

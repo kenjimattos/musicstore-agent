@@ -18,7 +18,7 @@ Interface esperada (commit 10). Em todas as tools, erro de validação ou de ace
     }
     # `customer_id` é injetado pelo código (resolvido pelo telefone do canal); não é argumento do
     # modelo. Sem ele, a pessoa é visitante: `order_id` + `email_or_phone` são obrigatórios e
-    # precisam bater com o dono do pedido. Com ele, só os pedidos do próprio cliente são visíveis,
+    # precisam bater com o dono do pedido; o retorno é só {"order": detail}, sem total nem lista. Com ele, só os pedidos do próprio cliente são visíveis,
     # e `email_or_phone` é ignorado.
 
     detail = {
@@ -262,6 +262,13 @@ def test_visitor_with_the_owners_email_sees_the_order(ready):
     result = tools.get_my_orders(order_id=14, email_or_phone="diego.castro@coldmail.com")
     assert result["order"]["order_id"] == 14
     assert result["order"]["status"] == "pending"
+
+
+def test_visitor_gets_only_the_verified_order_and_never_the_customers_total(ready):
+    """O Pedro (3) tem os pedidos 1 e 19; o visitante que verifica o 1 não pode nem saber do 19."""
+    result = tools.get_my_orders(order_id=1, email_or_phone="pedro.oliveira@jmail.com")  # Pedro tem 1 e 19
+    assert set(result) == {"order"}
+    assert result["order"]["order_id"] == 1
 
 
 def test_visitor_email_is_compared_ignoring_case_and_spaces(ready):
