@@ -37,12 +37,14 @@ def outcome(rows: list[dict], expected_turns: int) -> tuple[str, str]:
 
 def main(root: Path) -> str:
     runs = sorted(p for p in root.iterdir() if p.is_dir() and p.name.startswith("run-"))
-    lines = [f"# Linha de base e2e: {root.name}", "", f"{len(runs)} rodadas, {len(SCENARIOS)} cenários.", "",
+    # só os cenários que rodaram em alguma rodada (uma rodada parcial não lista os demais como falha)
+    scenarios = [s for s in SCENARIOS if any((run / f"{s.id}.jsonl").exists() for run in runs)]
+    lines = [f"# Linha de base e2e: {root.name}", "", f"{len(runs)} rodadas, {len(scenarios)} cenários.", "",
              "| cenário | " + " | ".join(r.name for r in runs) + " | acerto |",
              "|---|" + "---|" * len(runs) + "---|"]
     failures = []
     totals = [0] * len(runs)
-    for scenario in SCENARIOS:
+    for scenario in scenarios:
         marks, passed = [], 0
         for k, run in enumerate(runs):
             status, reason = outcome(load(run, scenario.id), len(scenario.turns))
@@ -53,7 +55,7 @@ def main(root: Path) -> str:
             else:
                 failures.append(f"- **{scenario.id}** ({run.name}) {reason}")
         lines.append(f"| {scenario.id} | " + " | ".join(marks) + f" | {passed}/{len(runs)} |")
-    lines.append("| **total** | " + " | ".join(f"{t}/{len(SCENARIOS)}" for t in totals) + " | |")
+    lines.append("| **total** | " + " | ".join(f"{t}/{len(scenarios)}" for t in totals) + " | |")
     lines += ["", "## Falhas", ""] + (failures or ["nenhuma"])
     report = "\n".join(lines) + "\n"
     (root / "report.md").write_text(report, encoding="utf-8")
