@@ -103,11 +103,28 @@ def _blocks(response) -> list[dict]:
     return [b.model_dump(exclude_none=True) for b in response.content]
 
 
+def reply_text(new: list[dict]) -> str | None:
+    """O texto enviado ao cliente: o de TODAS as mensagens do assistente no turno, em ordem.
+
+    Inclui o que o modelo escreveu antes de um tool_use; senão essa parte sumiria para o cliente
+    e escaparia do output_guard, embora fique no histórico como dita.
+    """
+    parts = []
+    for message in new:
+        if message["role"] != "assistant":
+            continue
+        text = "".join(b["text"] for b in message["content"] if b["type"] == "text").strip()
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts) or None
+
+
 def run_agent_loop(messages: list[dict], system: list[dict], *, customer_id, phone, thread_id, trace: Trace):
     """Loop clássico: chama o modelo; enquanto pedir tools, executa e devolve os tool_result.
 
     `messages` é alterada no lugar (mensagens do assistente e dos tool_result do turno).
-    Devolve (texto, mensagens novas no formato do banco), ou (None, novas) se atingiu o limite de iterações.
+    Devolve (texto de todo o turno, mensagens novas no formato do banco), ou (None, novas) se atingiu
+    o limite de iterações.
     """
     new: list[dict] = []
     for _ in range(_max_iterations()):
@@ -126,8 +143,7 @@ def run_agent_loop(messages: list[dict], system: list[dict], *, customer_id, pho
         stored = [b for b in blocks if b["type"] != "thinking" and b["type"] != "redacted_thinking"]
         new.append({"role": "assistant", "content": stored})
         if response.stop_reason != "tool_use":
-            text = "".join(b["text"] for b in blocks if b["type"] == "text").strip()
-            return (text or None), new
+            return reply_text(new), new
         results = []
         for block in blocks:
             if block["type"] != "tool_use":
