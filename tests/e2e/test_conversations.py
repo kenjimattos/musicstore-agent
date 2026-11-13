@@ -51,11 +51,14 @@ def check_turn(expect: Expect, reply, label: str) -> None:
     called = [c.name for c in trace.tool_calls]
     ctx = f"\n[{label}]\nresposta: {text}\ntools: {called}"
 
-    assert trace.guard_category == expect.category, f"categoria do guard{ctx}"
+    if expect.category is not None:
+        assert trace.guard_category == expect.category, f"categoria do guard{ctx}"
     if expect.tone:
         assert trace.guard_tone == expect.tone, f"tom do guard{ctx}"
 
-    if expect.blocked:
+    if expect.category is None and trace.blocked:  # barrar é aceito: o agente não foi chamado
+        assert trace.iterations == 0 and not called, ctx
+    elif expect.blocked:
         assert trace.blocked, f"o agente não deveria ter sido chamado{ctx}"
         assert trace.iterations == 0 and not called, ctx
         assert trace.output_verdict is None, ctx
@@ -68,6 +71,8 @@ def check_turn(expect: Expect, reply, label: str) -> None:
         assert set(called) == set(expect.tools), f"conjunto de tools{ctx}"
     for name in expect.tools_include:
         assert name in called, f"faltou chamar {name}{ctx}"
+    for name in expect.not_tools:
+        assert name not in called, f"não podia chamar {name}{ctx}"
     for name, n in expect.calls.items():
         assert called.count(name) == n, f"{name} deveria ser chamada {n}x{ctx}"
 
