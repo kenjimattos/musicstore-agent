@@ -92,7 +92,7 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
   - **Fontes do output_guard:** resultados de tools do **turno atual** + `politicas.md`. Um valor em R$ que só aparece em resposta de turno anterior reprova e dispara o retry com feedback.
 - **Prompt caching:** o system prompt tem dois blocos.
   1. **Bloco fixo**, com `cache_control`: persona + regras + few-shot + políticas curadas. É igual para todos os clientes, então o cache vale entre conversas.
-  2. **Bloco dinâmico**, depois do fixo e fora do cache. Leva `Cliente: Ana (identificada pelo telefone)` ou `Cliente: visitante (número não cadastrado)`, a `REFERENCE_DATE` e o tom detectado no turno.
+  2. **Bloco dinâmico**, depois do fixo e fora do cache. Leva `Cliente: Ana (identificada pelo telefone)` ou `Cliente: visitante (número não cadastrado)`, a data e hora de hoje vindas de `today()` (como fato, sem a palavra "simulação"; ver "Data simulada") e o tom detectado no turno.
      - Do cadastro, vai só o primeiro nome e o status: nunca e-mail, telefone ou pedidos.
      - Como fica depois do bloco cacheado, mudar de cliente ou de turno não invalida o cache das políticas.
   3. **Organização do bloco fixo:** persona e regras primeiro; as políticas dentro de `<politicas>…</politicas>`; um lembrete curto das regras críticas depois delas. Assim as instruções não ficam enterradas no meio do texto longo.
@@ -371,7 +371,14 @@ musicstore-agent/
     **Decisão:** cada cadastro é um cliente distinto, e o agente **não unifica** cadastros por nome nem por e-mail. Unificar errado vazaria pedidos de uma pessoa para outra; não unificar, no pior caso, faz o cliente pedir ajuda à equipe.
     - Os telefones são únicos na base, então a identificação pelo número é inequívoca.
     - Em produção, a deduplicação seria feita no cadastro (por CPF, por exemplo), não pelo agente.
-- **Data de referência:** os pedidos vão até 22/03/2026. Com a data real (nov/2026), toda devolução cairia fora do prazo. Por isso a "data atual" vem de `REFERENCE_DATE` no env, com default `2026-03-25`, logo após o último pedido. Se a variável ficar vazia, usa a data real. Suposição documentada.
+- **Data simulada:** os pedidos vão até 22/03/2026. Com a data real (nov/2026), toda devolução cairia fora do prazo e todo pedido pareceria meses atrasado. Por isso a "data de hoje" vem de `REFERENCE_DATE` no env, com default `2026-03-25`, logo após o último pedido. Se a variável ficar vazia, usa a data real. Suposição documentada.
+  - **Uma fonte só:** a função `today()` (data simulada + o horário real de Campo Grande, `America/Campo_Grande`) é usada por todas as partes que dependem de data: tools (prazos, atrasos, janelas de troca), bloco dinâmico do prompt, painel da UI e testes, que fixam `REFERENCE_DATE`. Nenhum código chama `date.today()` diretamente. Com o horário real, perguntas como "vocês estão abertos agora?" funcionam com o horário de funcionamento.
+  - **No prompt, a data entra como fato, não como simulação:** `Hoje é quarta-feira, 25/03/2026, 14:32 (horário de Campo Grande).` O system prompt **não** diz que é uma simulação, por três motivos:
+    - a persona poderia repetir "simulação" para o cliente;
+    - o modelo poderia tratar a data como hipotética e misturar com o que acha que é a data atual;
+    - para o agente, a data de hoje é só mais um dado de contexto, como o nome do cliente.
+  - O modelo não tem relógio próprio. Sem uma data no prompt, ele "chutaria" uma data, por isso ela entra sempre.
+  - **Quem fica sabendo da simulação:** o avaliador, por um aviso no topo da UI ("Data simulada: 25/03/2026, para coincidir com os dados do exercício") e pelo README.
 - **Data atual injetada no prompt:** a janela de arrependimento (7 dias) e a de defeito (30 dias) usam `estimated_delivery` como proxy da data de recebimento.
 
 ## UI (`app.py`): simulação do WhatsApp
@@ -384,6 +391,7 @@ musicstore-agent/
   - nome, telefone, e-mail e cidade;
   - uma tabela com os pedidos do cliente: id, data, status, total, itens, rastreio e previsão de entrega;
   - as **solicitações de exclusão de dados** do cliente (protocolo, data, status), com o aviso de que os dados continuam no banco, por ser uma simulação.
+- **Aviso no topo da página:** "Data simulada: 25/03/2026, para coincidir com os dados do exercício."
 
   Serve para conferir se o agente respondeu certo. Por exemplo: a Ana pergunta pelo pedido dela e o avaliador compara a resposta com a tabela.
   - **O painel não é enviado ao modelo.** O agente só vê o que as tools retornam, e o rótulo do painel deixa isso explícito.
@@ -533,6 +541,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 - Tratamento de dados e suposições.
 - Limitações e próximos passos:
   - Postgres (mudança isolada em `db.py`);
+  - **data simulada:** `REFERENCE_DATE` existe só porque os dados são de março de 2026. Em produção, `today()` passa a usar a data real e a variável é removida;
   - **exclusão de dados real (LGPD):** hoje é só o registro do pedido. Em produção, uma fila tratada pela equipe, com verificação de identidade, cobrindo também `messages` e `audit_log`, anonimizando pedidos com obrigação fiscal e apagando no sistema de origem, porque um novo export de CSV recriaria o cliente;
   - integração real com a WhatsApp Business API: um endpoint FastAPI recebe o webhook e chama `respond(phone, text)`, sem mudar o agente;
   - **cadastro em CRM externo:** se a identificação passar a depender de uma API lenta ou paga, buscar o cadastro sob demanda ou guardar em cache por conversa, em vez de consultar a cada mensagem;
