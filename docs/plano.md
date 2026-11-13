@@ -306,9 +306,18 @@ musicstore-agent/
      - O ranking é feito no SQL (`ORDER BY CASE …, order_date DESC LIMIT 6`), sem lógica no prompt.
    - **Cliente identificado, com `order_id`:** retorna aquele pedido em detalhe, se for do cliente. Se for de outro cliente → "não encontrado".
    - **Visitante:** `order_id` + `email_or_phone` obrigatórios e verificados contra o dono do pedido.
-   - **Campos calculados em Python** (com `REFERENCE_DATE`), para o modelo não fazer conta de datas:
+   - **Campos calculados em Python** (com a data simulada, `today()`), para o modelo não fazer conta de datas nem de prazos:
      - `days_since_delivery`, para as janelas de 7 e 30 dias;
-     - `is_late`: previsão de entrega já passou e o pedido ainda não foi entregue.
+     - `delivery_region`: `metropolitana` se a cidade do cliente está em `METRO_CITIES`, senão `outras_cidades`. O default de `METRO_CITIES` é `{"Campo Grande"}`, configurável. Das cidades da base (Campo Grande, Dourados, Três Lagoas, Corumbá, Ponta Porã), só Campo Grande é da região metropolitana;
+     - `expected_by` e `deadline_source`, o prazo esperado e de onde ele veio:
+       - **pedido com previsão de entrega** (enviado): a `estimated_delivery` do pedido, com fonte `pedido`. Pela regra de precedência, o dado da base vale sobre o prazo da política;
+       - **pedido confirmado, sem previsão** (aguardando envio): a data do pedido + o prazo da política para a região, em dias úteis, com fonte `politica`. Região metropolitana: até 3 dias úteis. Outras cidades: até 12 dias úteis, o maior prazo entre PAC, SEDEX e Jadlog, porque a base não registra a modalidade e é melhor não acusar atraso que não existe;
+       - **pedido pendente:** sem prazo (`awaiting_payment = true`). O relógio de entrega só começa com o pagamento confirmado;
+     - `is_late` e `days_late`: a data de hoje passou de `expected_by` e o pedido não foi entregue;
+     - **Suposições para o README:**
+       - o manual não define prazo de despacho. Por isso o prazo da política conta a partir da data do pedido, porque a base não tem data de confirmação;
+       - dias úteis ignoram feriados.
+     - **O que isso dá na data simulada (25/03/2026), conferido nos dados:** o pedido 8 (enviado, previsão 28/02) está 25 dias atrasado; os confirmados 9, 11 e 12 (Campo Grande) e 10 (Três Lagoas) estão de 12 a 28 dias atrasados pelo prazo da política; os pendentes 13 a 16 não têm prazo. A base produz muitos atrasos, então esse fluxo será comum na demo.
    - O `customer_id` vem do telefone e é injetado pelo código; nunca é argumento do modelo.
 4. `list_categories()`: lista as categorias com contagem de produtos ativos, incluindo as vazias.
 5. `request_data_deletion()`: registra um pedido de exclusão de dados (**simulação**, nada é apagado). Sem argumentos; só para cliente identificado; idempotente. Detalhes em "Exclusão de dados (LGPD), simulada".
@@ -350,6 +359,7 @@ musicstore-agent/
   | 11 | Frete de R$ 35 abaixo de R$ 500 | taxa fixa na região metropolitana | pedidos 7, 8, 9, 11 e 16 (Campo Grande, abaixo de R$ 500) têm total igual ao preço de tabela, sem frete | Idem |
   | 12 | Totais de pedido | n/a | pedidos 3 e 20 têm total menor que a soma dos preços de tabela (R$ 48 e R$ 88), sem promoção que explique | Idem; se o cliente questionar, encaminha à equipe |
   | 13 | Descrição do produto 144 | n/a | o Roland Synth 3 Pro descreve um "teclado arranjador Yamaha" | Nome e preço vêm dos campos; a descrição é repassada como está, e o conflito fica registrado |
+  | 14 | Meio e prazo de entrega em Campo Grande | motoboy próprio, de 1 a 3 dias úteis | os pedidos enviados para Campo Grande têm código no formato dos Correios e previsão de 10 a 15 dias depois da compra | Para pedido enviado, vale a previsão do próprio pedido. O agente não afirma o meio de entrega. O prazo da política só é usado para pedido confirmado ainda sem previsão |
 
   - **Regra de precedência entre as fontes (decisão registrada no README):** os CSVs representam o **sistema da loja**, então, para **dados**, eles prevalecem sobre o manual. O manual vale para **regras e procedimentos**.
 
@@ -361,7 +371,7 @@ musicstore-agent/
 
     Consequência para promoções: se o manual promete "Black Friday de 15 a 30% em todo o catálogo" e a base tem outra coisa, o agente informa o que a base tem. Por isso as faixas de desconto saem do `politicas.md`: deixá-las ali daria ao agente (e ao output_guard) uma fonte que contradiz o sistema.
   - **Princípio comum:** o manual vale para **compras novas**; o que está registrado na base (preço, pedido, promoção) vale como registro. O agente não faz auditoria nem "corrige" dados, e encaminha à equipe quando o cliente contesta.
-  - **Itens 1 a 4 e 6** são tratados na curadoria do `politicas.md`. **Itens 5 e 7** viram regras do prompt. **Itens 8 a 13** não exigem código, só a regra de não recalcular.
+  - **Itens 1 a 4 e 6** são tratados na curadoria do `politicas.md`. **Itens 5 e 7** viram regras do prompt. **Itens 8 a 13** não exigem código, só a regra de não recalcular. **Item 14** é tratado no cálculo de prazo de `get_my_orders` (a previsão do pedido prevalece; o prazo da política só vale sem previsão).
   - **Testes e2e acrescentados:** "qual o telefone e o e-mail da loja?" responde só com 3341-4444 e o e-mail sem acento; "vai ter Black Friday? quanto de desconto?" não promete nenhuma faixa nem data; "vocês têm flauta ou trompete?" diz que não há produtos dessas categorias no momento.
 - **Inconsistências nos dados, mantidas nos arquivos e tratadas no prompt/README:** os itens 4, 8 e 13 da tabela acima, mais os cadastros duplicados:
   - **Cadastros possivelmente duplicados:**
@@ -486,8 +496,8 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 | 6 | `feat(data): curated policies file and loader` | `data/politicas.md` (curadoria do manual) + `policies.py` | verde |
 | 7 | `test(tools): product search and details` | bordas (96 sem estoque, 113 descontinuado, 130 em breve, promoção ativa do 94, PIX não acumula com promoção, parcelas pela regra 3.1), SQL injection, `%` escapado | vermelho |
 | 8 | `feat(tools): product search and details` | `search_products`, `get_product_details`, `list_categories` + repositório | verde |
-| 9 | `test(tools): order lookup and customer isolation` | `identify_customer` acha a Ana por "(67) 99654-7821" e por "67996547821", e um número desconhecido vira visitante; Ana vê o pedido 8 em detalhe com `is_late=true`; Ana pedindo o 14 → não encontrado; visitante com e-mail errado → negado; **cadastros parecidos:** os telefones de Bruno 11 e Bruno 43 resolvem para ids diferentes; Bruno 43 pedindo o pedido 10 (do Bruno 11) → não encontrado, mesmo informando o e-mail que os dois compartilham; visitante com pedido 10 + `bruno.martins@jmail.com` → liberado, porque o e-mail é do dono do pedido; Diego 47 pedindo o 14 (do Diego 13) → não encontrado; **ranking:** com pedidos sintéticos na fixture, a ordem é aberto > entregue recente > antigo/cancelado, com no máximo 5 no resumo e `total_orders` correto; `days_since_delivery` com `REFERENCE_DATE`; sem e-mail/telefone no retorno | vermelho |
-| 10 | `feat(tools): order lookup with customer isolation` | `identify_customer(phone)`, `get_my_orders` (ranking em SQL), injeção de `customer_id` | verde |
+| 9 | `test(tools): order lookup and customer isolation` | `identify_customer` acha a Ana por "(67) 99654-7821" e por "67996547821", e um número desconhecido vira visitante; Ana vê o pedido 8 em detalhe com `is_late=true`; Ana pedindo o 14 → não encontrado; visitante com e-mail errado → negado; **cadastros parecidos:** os telefones de Bruno 11 e Bruno 43 resolvem para ids diferentes; Bruno 43 pedindo o pedido 10 (do Bruno 11) → não encontrado, mesmo informando o e-mail que os dois compartilham; visitante com pedido 10 + `bruno.martins@jmail.com` → liberado, porque o e-mail é do dono do pedido; Diego 47 pedindo o 14 (do Diego 13) → não encontrado; **ranking:** com pedidos sintéticos na fixture, a ordem é aberto > entregue recente > antigo/cancelado, com no máximo 5 no resumo e `total_orders` correto; `days_since_delivery` com `REFERENCE_DATE`; **prazos e atrasos em 25/03/2026:** pedido 8 → `expected_by` 28/02, fonte `pedido`, 25 dias de atraso; 9 → 25/02, fonte `politica`, região `metropolitana`, 28 dias; 10 → 13/03, `outras_cidades`, 12 dias; 11 → 10/03, 15 dias; 12 → 13/03, 12 dias; 13 a 16 → `awaiting_payment`, sem atraso; soma de dias úteis pula o fim de semana; `METRO_CITIES` configurável; nenhum código usa `date.today()` direto (tudo via `today()`); sem e-mail/telefone no retorno | vermelho |
+| 10 | `feat(tools): order lookup with customer isolation` | `identify_customer(phone)`, `get_my_orders` (ranking em SQL, campos de prazo e atraso), `today()`, injeção de `customer_id` | verde |
 | 10b | `test(tools): simulated data deletion request` | `request_data_deletion` para a Ana cria uma linha em `data_requests` com status `pending` e devolve protocolo; **os dados dela não mudam** (`customers`, `orders` e `messages` idênticos antes e depois); segunda chamada devolve o mesmo protocolo (idempotente); visitante → orientação, sem escrever nada; o `customer_id` não está no JSON Schema da tool; as consultas continuam na conexão somente leitura (escrever por ela falha); re-ingest de CSV não apaga `data_requests`. Também entra em `scenarios.py` o cenário e2e de exclusão. Sub-passo de TDD sem renumerar a tabela | vermelho |
 | 10c | `feat(tools): simulated data deletion request` | tabela `data_requests`, função de repositório com a conexão de escrita (só `INSERT`), `request_data_deletion` + schema + dispatch | verde |
 | 11 | `test(guards): deterministic output guard` | R$ inventado reprova; produto não consultado reprova; valores da tool aprovam; código de rastreio inventado reprova | vermelho |
@@ -536,12 +546,13 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 - Como atualizar políticas e dados, incluindo o aviso de que os testes de aceite são ancorados nos dados entregues (seção "Testes e2e").
   - **Políticas:** editar `data/politicas.md`. Um PDF novo da loja precisa de curadoria antes de valer, com o que fica, o que sai e as contradições resolvidas.
 - **Precedência das fontes:** os CSVs (sistema da loja) prevalecem sobre o manual para dados como promoções, preços e estoque; o manual vale para regras e procedimentos. Inclui a tabela de quem prevalece em cada tipo de informação.
-- **Conflitos entre o manual e a base:** a tabela de 13 itens, com a decisão de cada um, e o princípio "manual para compras novas, base como registro". Registra explicitamente o telefone e o e-mail divergentes, as campanhas e faixas de desconto que não batem com a tabela de promoções e os pedidos que não seguem as regras de pagamento e frete.
+- **Conflitos entre o manual e a base:** a tabela de 14 itens, com a decisão de cada um, e o princípio "manual para compras novas, base como registro". Registra explicitamente o telefone e o e-mail divergentes, as campanhas e faixas de desconto que não batem com a tabela de promoções e os pedidos que não seguem as regras de pagamento e frete.
 - Política de histórico e contexto: por que os resultados de tools antigos são omitidos e o que isso custa.
 - Tratamento de dados e suposições.
 - Limitações e próximos passos:
   - Postgres (mudança isolada em `db.py`);
   - **data simulada:** `REFERENCE_DATE` existe só porque os dados são de março de 2026. Em produção, `today()` passa a usar a data real e a variável é removida;
+  - **prazo de despacho:** o manual não define. Hoje o prazo da política conta a partir da data do pedido; com uma data de confirmação do pagamento na base, o cálculo ficaria exato;
   - **exclusão de dados real (LGPD):** hoje é só o registro do pedido. Em produção, uma fila tratada pela equipe, com verificação de identidade, cobrindo também `messages` e `audit_log`, anonimizando pedidos com obrigação fiscal e apagando no sistema de origem, porque um novo export de CSV recriaria o cliente;
   - integração real com a WhatsApp Business API: um endpoint FastAPI recebe o webhook e chama `respond(phone, text)`, sem mudar o agente;
   - **cadastro em CRM externo:** se a identificação passar a depender de uma API lenta ou paga, buscar o cadastro sob demanda ou guardar em cache por conversa, em vez de consultar a cada mensagem;
