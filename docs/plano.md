@@ -640,8 +640,16 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
   - **Como foi usado:**
     - planejamento em modo de plano, com o candidato questionando cada proposta antes de qualquer código;
     - implementação em TDD (commits `test:` antes de `feat:`);
-    - revisão dos transcripts gerados.
+    - revisão dos transcripts gerados;
+    - antes de cada passo de código, o assistente descreve o que vai fazer e o candidato aprova ou corrige;
+    - as perguntas do candidato conduziram o desenho: "o agente consulta o CSV e não o SQLite?" e "o ingest roda a cada consulta?" expuseram pontos que o plano deixava ambíguos.
   - **Divisão de papéis:** o candidato definiu requisitos e restrições e tomou as decisões. O assistente propôs desenhos, levantou trade-offs e apontou inconsistências nos dados.
+  - **Sessões novas do assistente, de propósito:** economizam tokens e funcionam como revisão com olhos frescos. Ao implementar o commit 4, uma sessão nova leu o plano e os testes juntos e expôs uma divergência entre eles: o teste do commit 3, escrito em outra sessão, exigia detectar qualquer mudança de conteúdo, e o plano dizia mtime mais novo. A sessão nova leu isso primeiro como lacuna do plano e propôs um desvio; foi o candidato quem resolveu a divergência. O episódio mostra que sessões diferentes, sem memória uma da outra, podem produzir especificações que se contradizem, e que a revisão humana as concilia.
+  - **Erros do assistente nesta etapa, corrigidos pelo candidato:**
+    - seguiu o teste do commit 3 como se fosse a especificação, sem notar que contradizia o plano;
+    - desenhou o erro de CSV rejeitado para derrubar toda consulta, quando o certo era acusar no ingest e seguir operando;
+    - exagerou o argumento do rollback ao propor o `executemany`: o teste de "CSV errado mantém o banco" passava de qualquer jeito, porque a validação roda antes da escrita; a transação protege contra falhas durante a gravação;
+    - atribuiu ao candidato uma razão de custo para o ingest só no startup, que a conversa não estabeleceu.
   - **Tabela de iterações do desenho:** mostra o que mudou e por quê. Cada linha tem a proposta inicial → o questionamento → a decisão final.
 
     | Tema | Proposta inicial | Questionamento | Decisão final |
@@ -658,5 +666,12 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     | Identidade do cliente | Número do pedido + e-mail no chat | "Teremos login?" | Canal WhatsApp: `respond(phone, text)`, cliente resolvido pelo telefone em código, nunca pelo LLM |
     | Persona | Atendente genérico com temperature 0 | Atendente deve ser músico; "temperatura não zerada?" | Roqueiro com descoberta do estilo do cliente; tom via few-shot, porque o modelo não aceita temperature |
     | Testes | Testes depois da implementação | "Podemos começar pelos testes?" | TDD nas partes determinísticas; critérios de aceite e2e escritos antes do agente |
+    | Reingestão dos CSVs | Reingerir quando o mtime for mais novo que a última importação, checando a cada consulta | Um teste do commit 3, de outra sessão, exigia detectar qualquer mudança de conteúdo, e o assistente propôs mtime + tamanho + sha256. "Isso pode subir uma base mais antiga?" | Regra estrita, com a premissa de que a loja sempre cola um export novo: mtime mais antigo é erro. Limite assumido: conteúdo diferente com o mesmo mtime não é detectado |
+    | CSV rejeitado | O erro do ingest falha toda consulta enquanto o arquivo ruim estiver em `data/` | "O arquivo errado deve acusar erro no ingest, mas não deve afetar a operação" | `startup()` registra no log e o agente segue com os dados anteriores; sem banco anterior, o erro sobe. Aviso na UI fica para depois |
+    | Quando ingerir | Checar os CSVs a cada consulta | "Deveria rodar somente no startup" | Ingest só no startup: o banco não muda no meio de uma conversa e o fluxo fica simples de explicar. Custo assumido: colar o CSV vale na próxima inicialização, e o README documenta o passo |
+    | Gravação no SQLite | `pandas.to_sql(replace)` | O assistente propôs outra via: o `to_sql` faz commit a cada tabela, não declara chaves nem índices e infere tipos. "Vamos trocar e tirar o pandas das dependências" | DDL explícito e `executemany` parametrizado, as 6 tabelas numa transação (atomicidade conferida à mão forçando uma falha no meio). O `pandas` saiu das dependências diretas |
+    | Specs na busca | `specs` só no JSON de `products`, fora do `search_text` | "Colocar tudo junto num campo é mesmo a melhor maneira?" O assistente olhou os dados: as chaves variam por categoria, `strings` é `nylon`/`steel` nos violões e uma contagem nas guitarras, e 16 produtos só têm `nylon` nas specs (um deles um violão) | Tabela `product_specs` no ingest e campo opcional `specs` em `search_products`, validado contra os dados. O assistente trocou a própria sugestão de filtros nomeados por um objeto genérico, para a loja cadastrar categorias novas sem mexer em código |
+    | Estilo → filtro | Mapeamento escrito no prompt ("MPB → nylon") | "Será que isso vai mesmo funcionar?" | Confiar no Haiku por enquanto, medindo nos cenários e2e (argumentos no `trace`, variações de frase). Se errar com frequência, escreve-se o mapeamento |
+    | Busca sem resultado | Sem regra: o modelo decide | "Qual ação do modelo estamos prevendo se a busca vier vazia?" | Regra de prompt: refazer a busca no máximo uma vez, tirando primeiro o `specs`, e dizer ao cliente o que foi aberto. O "uma vez" foi escolhido para caber em 3 idas ao modelo e é ajustável |
 
   - **Formato:** a tabela fica curta. Cada linha é defensável em entrevista, porque registra uma decisão que o candidato tomou e consegue justificar.
