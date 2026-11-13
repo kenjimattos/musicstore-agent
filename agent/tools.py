@@ -17,11 +17,12 @@ MAX_RESULTS = 10
 MAX_QUERY_CHARS = 200
 MAX_ALTERNATIVES = 3
 PIX_DISCOUNT = 0.05
-
-# Regra 3.1 do manual: parcela mínima por faixa de número de parcelas (sem juros, até 12x).
-# Até 3x vale o piso de R$ 50 por parcela; de 4x a 6x, R$ 80; de 7x a 12x, R$ 100.
 MAX_INSTALLMENTS = 12
-MIN_INSTALLMENT_BRL = {**dict.fromkeys(range(2, 4), 50.0), **dict.fromkeys(range(4, 7), 80.0),
+
+# Regra 3.1 do manual: compra abaixo de R$ 50 não parcela; até 3x não há parcela mínima;
+# de 4x a 6x, R$ 80; de 7x a 12x, R$ 100.
+MIN_PURCHASE_TO_INSTALL_BRL = 50.0
+MIN_INSTALLMENT_BRL = {**dict.fromkeys(range(2, 4), 0.0), **dict.fromkeys(range(4, 7), 80.0),
                        **dict.fromkeys(range(7, 13), 100.0)}
 
 
@@ -35,6 +36,8 @@ def _money(value: float) -> float:
 
 def _installments(price: float) -> dict:
     """Maior número de parcelas sem juros que respeita a parcela mínima da faixa."""
+    if price < MIN_PURCHASE_TO_INSTALL_BRL:
+        return {"count": 1, "value_brl": _money(price)}
     for count in range(MAX_INSTALLMENTS, 1, -1):
         if price / count >= MIN_INSTALLMENT_BRL[count]:
             return {"count": count, "value_brl": _money(price / count)}

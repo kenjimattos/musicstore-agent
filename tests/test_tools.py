@@ -136,6 +136,13 @@ def test_installments_follow_rule_3_1(ready):
     assert dear["installments"] == {"count": 12, "value_brl": pytest.approx(2199 / 12, abs=0.01)}
 
 
+def test_purchase_below_50_is_not_installable_and_up_to_3x_has_no_minimum():
+    # regra 3.1: abaixo de R$ 50 não parcela; até 3x não há parcela mínima
+    assert tools._installments(49.9) == {"count": 1, "value_brl": 49.9}
+    assert tools._installments(50) == {"count": 3, "value_brl": pytest.approx(16.67, abs=0.01)}
+    assert tools._installments(200) == {"count": 3, "value_brl": pytest.approx(66.67, abs=0.01)}  # 4x seria R$ 50 (< R$ 80)
+
+
 def test_installments_use_the_promotional_price(ready):
     item = by_id(tools.search_products(query="Taylor 110e"), 94)
     assert item["installments"]["count"] == 12
