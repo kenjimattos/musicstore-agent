@@ -162,6 +162,18 @@ def test_order_number_not_consulted_fails(order8, pol):
     assert_blocked(check("Seu pedido 14 está a caminho.", [order8], pol), "14")
 
 
+def test_numbered_list_after_the_word_pedido_is_not_an_order_number(pol):
+    # o "2." da lista, na linha seguinte a "pedido", não é o pedido 2 (falso positivo visto no e2e)
+    text = "Pra eu localizar sua compra, me manda:\n1. O número do pedido\n2. O e-mail ou telefone do cadastro"
+    assert check(text, [], pol).ok
+    assert check("Me passa o número do pedido\n- e o e-mail do cadastro", [], pol).ok
+
+
+def test_order_number_on_the_same_line_is_still_checked(pol):
+    assert_blocked(check("Seu pedido nº 14 está a caminho.", [], pol), "14")
+    assert_blocked(check("O pedido #14 saiu.", [], pol), "14")
+
+
 def test_escalation_protocol_from_tool_passes(ready, pol):
     ticket = tools.escalate_to_team("atraso", "Pedido 8 atrasado", 8, customer_id=ANA)
     assert check(f"Abri o chamado {ticket['protocol']}. Retorno até 24 horas úteis.", [ticket], pol).ok
