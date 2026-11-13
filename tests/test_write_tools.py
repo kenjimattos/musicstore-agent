@@ -9,10 +9,10 @@ Interface esperada (commit 10c). Toda tool devolve um dict; erro vira `{"error":
     tools.escalate_to_team(reason, summary, order_id=None, *, customer_id=None, phone=None,
                            thread_id=None) -> {
         "protocol": "ATD-000001", "status": "open", "return_deadline": "até 24 horas úteis",
-        "already_open": bool,
+        "already_open": bool, "note_added": bool,
     }   # reason: atraso | reclamacao | valor_contestado | outro; summary: texto de até 300 caracteres
         # idempotente por (cliente ou telefone, pedido): com chamado aberto para o pedido, devolve o mesmo
-        # protocolo, qualquer que seja o motivo
+        # protocolo, qualquer que seja o motivo, e anota nele o resumo novo (note_added), se for diferente
 
     tools.customer_protocols(*, customer_id=None, phone=None) -> ["ATD-000001", "LGPD-000001", ...]
         # protocolos do próprio cliente (chamados e pedidos de exclusão); fonte do output_guard
@@ -26,8 +26,10 @@ nos schemas e o dispatch recusa esses nomes nos argumentos.
 Tabelas (criadas pelo `ingest_all`, que nunca as apaga ao reimportar os CSVs):
     data_requests(request_id, customer_id, thread_id, requested_at, status)
     support_tickets(ticket_id, customer_id, phone, order_id, reason, summary, thread_id, created_at, status)
+    ticket_notes(note_id, ticket_id, reason, summary, thread_id, created_at)
 
-Duas escritas, só `INSERT`; nenhuma altera customers, orders, order_items, products nem promotions.
+Escritas só com `INSERT`; nenhuma altera customers, orders, order_items, products nem promotions,
+e o chamado original nunca é alterado (a informação nova vai para ticket_notes).
 """
 
 import re
@@ -173,6 +175,66 @@ def test_another_reason_for_the_same_order_reuses_the_open_ticket(ready):
     assert other["protocol"] == first["protocol"]
     assert other["already_open"] is True
     assert len(query("SELECT * FROM support_tickets")) == 1
+
+
+# ---------- anotações no chamado aberto ----------
+# Com chamado aberto, a informação nova vira uma anotação nele (INSERT em ticket_notes);
+# o chamado original não muda. Assim, "registrei sua reclamação no chamado" é verdade.
+
+
+def test_new_ticket_has_no_notes(ready):
+    result = escalate()
+    assert result["note_added"] is False
+    assert query("SELECT * FROM ticket_notes") == []
+
+
+def test_follow_up_on_open_ticket_adds_a_note(ready):
+    first = escalate()
+    again = escalate(reason="reclamacao", summary="Diz que já reclamou antes do mesmo atraso.", thread_id="t2")
+    assert again["note_added"] is True
+    [note] = query("SELECT * FROM ticket_notes")
+    assert note["ticket_id"] == int(first["protocol"].removeprefix("ATD-"))
+    assert (note["reason"], note["summary"], note["thread_id"]) == ("reclamacao", "Diz que já reclamou antes do mesmo atraso.", "t2")
+    assert note["created_at"]
+
+
+def test_follow_up_does_not_change_the_original_ticket(ready):
+    escalate()
+    [before] = query("SELECT * FROM support_tickets")
+    escalate(reason="reclamacao", summary="Diz que já reclamou antes.")
+    assert query("SELECT * FROM support_tickets") == [before]
+
+
+def test_repeated_identical_summary_adds_no_duplicate_note(ready):
+    escalate()
+    escalate(reason="reclamacao", summary="Diz que já reclamou antes.")
+    repeat = escalate(reason="reclamacao", summary="Diz que já reclamou antes.")
+    assert repeat["note_added"] is False
+    assert len(query("SELECT * FROM ticket_notes")) == 1
+    same_as_ticket = escalate()  # mesmo resumo do chamado original
+    assert same_as_ticket["note_added"] is False
+    assert len(query("SELECT * FROM ticket_notes")) == 1
+
+
+def test_follow_up_on_someone_elses_order_adds_nothing(ready):
+    tools.escalate_to_team("atraso", "Pedido 14 atrasado.", 14, customer_id=DIEGO_13, thread_id="t9")
+    result = escalate(order_id=14, summary="Quero saber do pedido do Diego.")
+    assert "error" in result
+    assert query("SELECT * FROM ticket_notes") == []
+
+
+def test_notes_do_not_change_store_tables(ready):
+    before = snapshot()
+    escalate()
+    escalate(reason="reclamacao", summary="Diz que já reclamou antes.")
+    assert snapshot() == before
+
+
+def test_reingest_keeps_ticket_notes(ready):
+    escalate()
+    escalate(reason="reclamacao", summary="Diz que já reclamou antes.")
+    ingest.ingest_all()
+    assert len(query("SELECT * FROM ticket_notes")) == 1
 
 
 def test_another_order_opens_another_ticket(ready):
