@@ -1,0 +1,1 @@
+Each commit must include an update to CHANGELOG.md
