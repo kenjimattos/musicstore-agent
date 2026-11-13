@@ -19,7 +19,6 @@ import json
 import logging
 import math
 import sqlite3
-import unicodedata
 from pathlib import Path
 
 from agent import db
@@ -145,11 +144,7 @@ def _to_real(text: str):
     return number
 
 
-def _normalize(text: str) -> str:
-    """Minúsculas e sem acento, para a busca de produtos (portável entre bancos)."""
-    decomposed = unicodedata.normalize("NFKD", text)
-    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return stripped.lower().encode("ascii", "ignore").decode("ascii")
+_normalize = db.normalize  # a mesma forma normalizada que a busca usa
 
 
 def _spec_rows(products: list[tuple], path_name: str) -> list[tuple]:

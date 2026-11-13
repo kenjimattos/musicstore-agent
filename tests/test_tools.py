@@ -25,8 +25,6 @@ Interface esperada (commit 8). Toda tool devolve um dict; erro de validação vi
 Os valores derivados vêm daqui, nunca de conta do LLM: é o que sustenta o output_guard.
 """
 
-import csv
-
 import pytest
 
 from agent import db, ingest, tools
@@ -79,7 +77,7 @@ def test_search_hides_unavailable_by_default(ready):
 
 
 def test_search_can_include_unavailable(ready):
-    result = tools.search_products(category="Violões", only_available=False, max_price=800)
+    result = tools.search_products(category="Violões", only_available=False, min_price=700, max_price=800)
     assert by_id(result, 96)["availability"] == "out_of_stock"
     assert by_id(result, 113)["availability"] == "discontinued"
 
@@ -120,8 +118,8 @@ def test_inactive_promotions_are_ignored(ready):
 def test_best_active_promotion_wins(ready):
     # promoção extra e ativa, maior que a de 8% do produto 94
     path = next(ready.data_dir.glob("*promotions.csv"))
-    with open(path, "a", encoding="utf-8", newline="") as f:
-        csv.writer(f).writerow([900, 94, 25, "Teste", 1])
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text + ("" if text.endswith("\n") else "\n") + "900,94,25,Teste,1\n", encoding="utf-8")
     ingest.ingest_all()
     item = by_id(tools.search_products(query="Taylor 110e"), 94)
     assert item["promotion"]["discount_percent"] == 25
@@ -231,10 +229,16 @@ def test_sql_injection_in_specs_is_inert(ready):
     assert table_count("product_specs") > 0
 
 
-@pytest.mark.parametrize("wildcard", ["%", "_", "%%", "a%"])
+@pytest.mark.parametrize("wildcard", ["_", "%%", "a%"])
 def test_like_wildcards_are_escaped(ready, wildcard):
     result = tools.search_products(query=wildcard, only_available=False)
     assert result["count"] == 0  # nenhum nome ou descrição contém esses caracteres literais
+
+
+def test_lone_percent_matches_only_the_literal_character(ready):
+    # só a descrição do produto 140 tem "%" ("100% Birch"); sem escape, voltaria o catálogo inteiro
+    result = tools.search_products(query="%", only_available=False)
+    assert ids(result) == {140}
 
 
 # ---------- get_product_details ----------
