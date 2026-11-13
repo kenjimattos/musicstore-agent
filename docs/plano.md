@@ -255,7 +255,7 @@ O agente diz "vou encaminhar à equipe" em vários fluxos: atraso, reclamação,
   - Devolve um **protocolo** (`ATD-000034`) e o prazo de retorno **das políticas**: "até 24 horas úteis" (seção 7.3). Como o prazo vem no resultado da tool, o output_guard aceita que ele apareça na resposta.
   - **Idempotente:** se já existe um chamado aberto com o mesmo cliente (ou telefone), o mesmo `order_id` e o mesmo `reason`, devolve o protocolo existente. Reclamar duas vezes do mesmo atraso não abre dois chamados.
 - **Quando o agente chama a tool, sem pedir confirmação:**
-  - pedido atrasado (`is_late = true`) e o cliente pergunta sobre ele;
+  - pedido atrasado (`is_late = true`) e o cliente pergunta onde ele está, quando chega, ou reclama. **Se ele só pede uma informação que o agente resolve (ex.: o código de rastreio), o agente responde, diz em uma frase que o pedido está atrasado e oferece abrir o chamado, sem abrir:** a missão do agente é desafogar a equipe, então chamado só para o que ele não resolve;
   - reclamação;
   - valor de pedido contestado (itens 9 a 12 da tabela de conflitos);
   - pedido de falar com uma pessoa.
@@ -535,7 +535,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
   - **a busca sem resultado:** um pedido que o filtro não atende (violão de nylon eletroacústico abaixo de um preço que nenhum cumpre). O `trace` mostra a 1ª busca vazia e **uma** 2ª busca, sem o `specs`; a resposta diz que o filtro foi aberto, cita só produtos vindos da tool e o turno usa no máximo 3 idas ao modelo. Um 2º cenário pede algo que nem a busca aberta atende e confere que a resposta diz que não há itens assim, sem produto inventado.
   - **pedido atrasado e encaminhamento:**
     - Ana pergunta "cadê meu pedido?": `get_my_orders` e `escalate_to_team` (motivo `atraso`, pedido 8) no mesmo turno, sem pedir confirmação; a resposta reconhece o atraso, traz o rastreio e o protocolo `ATD-…` da tool e o retorno em até 24h úteis; **não** promete nova data, cancelamento nem reembolso;
-    - Ana pergunta "qual o código de rastreio do meu pedido?" (`ana_tracking_code`): a resposta traz o código que veio de `get_my_orders`, mesmo com o pedido atrasado e o chamado aberto. O manual (seção 5.3) não obriga o atendente a informar o código, mas é a resposta direta à pergunta;
+    - Ana pergunta "qual o código de rastreio do meu pedido?" (`ana_tracking_code`): a resposta traz o código que veio de `get_my_orders` e **não abre chamado** (só `get_my_orders` no `trace`). O código só é informado quando a pergunta é direta sobre envio, frete ou entrega; em outros assuntos o agente apenas oferece. O manual (seção 5.3) não obriga o atendente a informar o código, mas é a resposta direta à pergunta;
     - Ana reclama de novo no turno seguinte: o mesmo protocolo, sem chamado novo;
     - o cliente do pedido 9 (confirmado, Campo Grande) pergunta pelo pedido: a resposta diz que ele ainda não foi enviado, que passou do prazo da região (até 3 dias úteis) e encaminha;
     - o cliente do pedido 16 (pendente): a resposta explica que o pedido aguarda a confirmação do pagamento, **sem** chamado aberto;

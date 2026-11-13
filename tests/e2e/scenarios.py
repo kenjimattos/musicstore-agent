@@ -424,8 +424,9 @@ SCENARIOS: tuple[Scenario, ...] = (
         turns=(
             Turn(
                 "qual o código de rastreio do meu pedido?",
+                # só informação que o agente resolve: sem chamado para a equipe (escalate_to_team)
                 Expect(
-                    tools_include=("get_my_orders",),
+                    tools=("get_my_orders",),
                     mention_all=("BRJL5544332BR",),
                 ),
             ),
