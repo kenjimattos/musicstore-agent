@@ -332,17 +332,18 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     Scenario(
         id="policy_defect_after_30_days",
-        title="Defeito depois dos 30 dias: segue o manual; se o cliente insiste, vai para a equipe",
+        title="Defeito depois dos 30 dias: a loja atende a reclamação, a troca vai ao fabricante, sem prazo",
         phone=VISITOR,
         turns=(
             Turn(
                 "comprei um violão há 2 meses e apareceu um defeito de fabricação, quem resolve?",
-                # manual: troca na loja até 30 dias; depois, fabricante, e a loja pode intermediar. Sem chamado ainda
-                Expect(mention_all=("fabricante",), mention_any=("30 dias",), not_mention=("troca em ate 90",)),
+                # a loja registra a reclamação (chamado) e explica que a troca depende do fabricante, sem prometer prazo
+                Expect(tools_include=("escalate_to_team",), mention_all=("fabricante",), mention_any=("prazo",)),
             ),
             Turn(
-                "isso é um absurdo, quero que a loja resolva, vou reclamar",
-                Expect(tone="frustrated", tools_include=("escalate_to_team",)),
+                "isso é um absurdo, quero a troca amanhã",
+                # não promete data; o mesmo chamado segue para atendente humano
+                Expect(tone="frustrated", tools_include=("escalate_to_team",), not_mention=("amanha eu garanto", "garantimos a troca")),
             ),
         ),
     ),

@@ -55,7 +55,7 @@ A loja segue as diretrizes do Código de Defesa do Consumidor (Lei nº 8.078/90)
 ### 4.2 Troca por defeito
 
 - Produtos com defeito de fabricação podem ser trocados em até 30 dias corridos após o recebimento do produto.
-- Passados os 30 dias, o cliente deve acionar a garantia diretamente com o fabricante. A loja pode intermediar o processo, mediante solicitação.
+- Passados os 30 dias, enquanto o produto estiver na garantia (seção 8), a loja atende a reclamação e encaminha a troca ao fabricante. O prazo dessa troca depende do fabricante e está fora do controle da loja, que não pode garantir prazo.
 - Danos causados por mau uso, quedas, exposição a umidade excessiva ou modificações não autorizadas não são cobertos.
 
 ### 4.3 Troca por preferência

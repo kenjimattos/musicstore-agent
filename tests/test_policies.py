@@ -178,6 +178,7 @@ def test_refund_is_only_promised_for_regret_returns_and_defect_follows_the_manua
     assert "O reembolso da devolução por arrependimento é feito" in md
     assert "contados a partir da confirmação do recebimento da solicitação de devolução pela loja" in md
     assert md.count("reembolso") == 1  # só aqui; o resto é "reembolsadas" (diferença de valor na troca)
-    # defeito: vale o manual (30 dias; depois, fabricante, com a loja intermediando), sem prometer o CDC
-    assert "Passados os 30 dias, o cliente deve acionar a garantia diretamente com o fabricante" in md
-    assert "dentro dos 90 dias da garantia legal, o cliente pode registrar" not in md
+    # defeito: até 30 dias a loja cobre a troca; depois, a loja atende a reclamação e a troca vai ao fabricante, sem prazo
+    assert "a loja atende a reclamação e encaminha a troca ao fabricante" in md
+    assert "fora do controle da loja, que não pode garantir prazo" in md
+    assert "deve acionar a garantia diretamente com o fabricante" not in md
