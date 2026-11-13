@@ -153,7 +153,11 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
     - pela leitura direta do sistema da loja (ERP ou e-commerce), via réplica de leitura ou API;
     - por um sync agendado, se a loja operar em planilhas. O nome dos CSVs sugere export do Google Sheets, então é um cenário realista para uma loja desse porte.
   - **O que sobrevive é a interface de `db.py`.** As tools dependem só de funções como `find_products()` e `get_order_with_items()`, nunca da origem dos dados. A validação e a limpeza passam para a integração com o sistema de origem.
-- **Busca sem acento:** a coluna `search_text` é normalizada no ingest, o que é portável entre bancos.
+- **Busca sem acento:** a coluna `search_text` é normalizada no ingest, o que é portável entre bancos. Ela leva só **nome e descrição**; as specs não entram nela, porque o JSON mistura chaves e valores sem sentido de texto (`yes`/`no`, `6` cordas).
+- **Specs consultáveis (`product_specs`):** `products.specs` continua sendo o JSON da fonte, e `get_product_details` o devolve. Para filtrar, o ingest também o explode na tabela `product_specs (product_id, key, value)`, na mesma transação das demais, com índice em `(key, value)`.
+  - As chaves variam por categoria (violões têm `strings`, `electronics`, `top`…; baterias têm `shells`, `pieces`…), e `strings` é `nylon`/`steel` nos violões mas uma contagem nas guitarras. Uma tabela chave/valor guarda isso sem colunas vazias e sem funções de JSON do SQLite, então continua portável para o Postgres.
+  - Valores guardados como texto, sem acento e em minúsculas, para o match; o JSON original não muda.
+  - **JSON inválido em `specs` vira `IngestError`** (linha e produto), em vez de passar em silêncio.
 - **Um banco só para tudo:** dados da loja, histórico de conversa (`messages`) e `audit_log`.
 
 | Fonte | Estratégia | Por quê (README) |
@@ -313,8 +317,13 @@ musicstore-agent/
 ```
 
 ## Tools (`agent/tools.py`)
-1. `search_products(query?, category?, min_price?, max_price?, only_available=True)`
+1. `search_products(query?, category?, specs?, min_price?, max_price?, only_available=True)`
    - Faz match sem acento e sem case.
+   - **`specs` (opcional): objeto `{chave: valor}`** para filtrar por característica, como `{"strings": "nylon"}` ou `{"electronics": "yes"}`. Todos os pares precisam casar (AND), e o match é exato, sem acento e sem case, sobre `product_specs`.
+     - **O Haiku faz a ligação entre o pedido do cliente e o filtro** (por exemplo, "toco MPB" → `strings: nylon`), com o conhecimento musical da persona. Por enquanto não há mapeamento escrito no prompt: confia-se no modelo e mede-se nos cenários e2e.
+     - **Chave ou valor desconhecido → erro claro**, com as chaves e os valores válidos (da categoria, se informada), para o modelo se corrigir na iteração seguinte. As opções vêm dos dados, então uma categoria nova da loja funciona sem mexer em código. A descrição do parâmetro cita os exemplos comuns.
+     - **Busca vazia não é beco sem saída:** o retorno traz os filtros aplicados e quantos produtos casariam sem o `specs`, para o modelo relaxar o filtro em vez de dizer que não há.
+     - A `category` continua sendo um filtro à parte, para "violão de nylon" não trazer ukulele.
    - Retorna até ~10 itens com: preço, estoque, status, promoção ativa (preço com desconto) e preço no PIX.
    - O PIX não acumula com promoção.
    - Retorna também o parcelamento máximo sem juros e o valor da parcela, seguindo as regras de parcela mínima da seção 3.1.
@@ -348,6 +357,13 @@ musicstore-agent/
 4. `list_categories()`: lista as categorias com contagem de produtos ativos, incluindo as vazias.
 5. `request_data_deletion()`: registra um pedido de exclusão de dados (**simulação**, nada é apagado). Sem argumentos; só para cliente identificado; idempotente. Detalhes em "Exclusão de dados (LGPD), simulada".
 6. `escalate_to_team(reason, summary, order_id?)`: **encaminha o atendimento para a equipe** (simulação: registra um chamado, não notifica ninguém). Detalhes em "Encaminhamento para a equipe, simulado".
+
+**Regra no prompt para busca sem resultado:**
+- Se `search_products` volta vazio, ler os filtros aplicados e quantos produtos casariam sem o `specs`.
+- **Refazer a busca no máximo uma vez**, tirando primeiro o `specs` (a `category` e o preço só mudam se o cliente concordar). Mais de uma busca refeita é insistência, e o limite de iterações a corta.
+- **Dizer sempre o que foi aberto**: "violão de nylon até R$ 1.000 eu não tenho, mas tenho estes de aço…". Nunca apresentar o resultado da busca aberta como se atendesse ao pedido original.
+- Se nem a busca aberta traz algo: dizer que não há itens assim no momento, sem inventar e sem lembrar produtos de buscas antigas (o output_guard reprova). Categoria sem produtos → `list_categories`.
+- **Erro de `specs`** (chave ou valor desconhecido): usar as opções que a tool listou e repetir a busca, sem comentar o erro com o cliente.
 
 **Regra no prompt para atraso de entrega:** usar só os campos da tool (`is_late`, `days_late`, `expected_by`, `deadline_source`).
 - Se o pedido **não está atrasado**, informar o status e o prazo esperado.
@@ -493,6 +509,8 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     - Por isso a fixture do teste insere pedidos extras **só na cópia temporária dos CSVs**, sem alterar `data/`. (Na cópia e não no banco, porque o re-ingest por mtime apagaria linhas inseridas direto no banco.)
     - A mesma fixture cobre o "sim, pode devolver": um pedido entregue há 3 dias. Nenhum pedido real cai na janela de 7 dias na `REFERENCE_DATE`.
   - a memória: "e no PIX?" no 2º turno é respondido sem repetir o nome do produto.
+  - **a busca por specs:** na descoberta ("toco MPB"), o `trace` mostra `search_products` com `specs = {"strings": "nylon"}` e a categoria Violões, e o produto 111 entre os resultados. Mais algumas variações de frase ("violão de aço", "tem captação?", "quero um violão pra tocar em barzinho") para medir o que o Haiku faz com o filtro. Se ele errar o filtro com frequência, o próximo passo é escrever o mapeamento estilo → spec no prompt.
+  - **a busca sem resultado:** um pedido que o filtro não atende (violão de nylon eletroacústico abaixo de um preço que nenhum cumpre). O `trace` mostra a 1ª busca vazia e **uma** 2ª busca, sem o `specs`; a resposta diz que o filtro foi aberto, cita só produtos vindos da tool e o turno usa no máximo 3 idas ao modelo. Um 2º cenário pede algo que nem a busca aberta atende e confere que a resposta diz que não há itens assim, sem produto inventado.
   - **pedido atrasado e encaminhamento:**
     - Ana pergunta "cadê meu pedido?": `get_my_orders` e `escalate_to_team` (motivo `atraso`, pedido 8) no mesmo turno, sem pedir confirmação; a resposta reconhece o atraso, traz o rastreio e o protocolo `ATD-…` da tool e o retorno em até 24h úteis; **não** promete nova data, cancelamento nem reembolso;
     - Ana reclama de novo no turno seguinte: o mesmo protocolo, sem chamado novo;
@@ -537,9 +555,11 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 | 2 | `test(e2e): acceptance scenarios` | `tests/e2e/scenarios.py` + `test_conversations.py`. É a especificação do comportamento do agente, escrita antes de tudo. | verde no padrão; `-m e2e` vermelho até o commit 15 |
 | 3 | `test(data): ingest and validation` | `conftest.py` (tmp data + `DB_PATH`), `test_ingest.py` (tabelas criadas, coluna faltando → erro claro, reingestão por mtime só no startup, CSV com mtime mais antigo → erro, CSV rejeitado mantém o banco anterior e o agente segue, `search_text` sem acento) | vermelho |
 | 4 | `feat(data): ingest CSVs into SQLite` | `db.py` (conexões rw/ro), `ingest.py` | verde |
+| 4b | `test(data): product specs table` | `product_specs` tem uma linha por par chave/valor do JSON (ex.: produto 111 → `strings = nylon`); valores sem acento e em minúsculas; JSON inválido → `IngestError`; reingestão recria a tabela com as demais, na mesma transação. Sub-passo de TDD sem renumerar a tabela | vermelho |
+| 4c | `feat(data): explode product specs for filtering` | `product_specs` no `ingest.py` + índice em `(key, value)` | verde |
 | 5 | `test(data): curated policies` | `politicas.md` contém as seções-chave (horário, pagamento e parcelamento, arrependimento, frete); todo R$, %, horário e prazo em dias dele existe no texto do PDF; não contém marcas internas ("uso restrito", seção de atendimento); **não contém conteúdo que conflita com a base**: `3321-4500`, `empóriodamusica`, "300", as faixas de desconto (15%, 30%…) e o calendário de campanhas ("Volta às Aulas", "Semana do Músico"); cache por mtime | vermelho |
 | 6 | `feat(data): curated policies file and loader` | `data/politicas.md` (curadoria do manual) + `policies.py` | verde |
-| 7 | `test(tools): product search and details` | bordas (96 sem estoque, 113 descontinuado, 130 em breve, promoção ativa do 94, PIX não acumula com promoção, parcelas pela regra 3.1), SQL injection, `%` escapado | vermelho |
+| 7 | `test(tools): product search and details` | bordas (96 sem estoque, 113 descontinuado, 130 em breve, promoção ativa do 94, PIX não acumula com promoção, parcelas pela regra 3.1), **filtro `specs`** (`{"strings": "nylon"}` na categoria Violões acha o produto 111 e não traz ukulele; vários pares são AND; match sem acento e sem case; chave ou valor desconhecido → erro que lista as opções válidas; busca vazia devolve os filtros aplicados e quantos casariam sem `specs`; `specs` malformado → erro de validação, e o valor vai sempre como parâmetro), SQL injection, `%` escapado | vermelho |
 | 8 | `feat(tools): product search and details` | `search_products`, `get_product_details`, `list_categories` + repositório | verde |
 | 9 | `test(tools): order lookup and customer isolation` | `identify_customer` acha a Ana por "(67) 99654-7821" e por "67996547821", e um número desconhecido vira visitante; Ana vê o pedido 8 em detalhe com `is_late=true`; Ana pedindo o 14 → não encontrado; visitante com e-mail errado → negado; **cadastros parecidos:** os telefones de Bruno 11 e Bruno 43 resolvem para ids diferentes; Bruno 43 pedindo o pedido 10 (do Bruno 11) → não encontrado, mesmo informando o e-mail que os dois compartilham; visitante com pedido 10 + `bruno.martins@jmail.com` → liberado, porque o e-mail é do dono do pedido; Diego 47 pedindo o 14 (do Diego 13) → não encontrado; **ranking:** com pedidos sintéticos na fixture, a ordem é aberto > entregue recente > antigo/cancelado, com no máximo 5 no resumo e `total_orders` correto; `days_since_delivery` com `REFERENCE_DATE`; **prazos e atrasos em 25/03/2026:** pedido 8 → `expected_by` 28/02, fonte `pedido`, 25 dias de atraso; 9 → 25/02, fonte `politica`, região `metropolitana`, 28 dias; 10 → 13/03, `outras_cidades`, 12 dias; 11 → 10/03, 15 dias; 12 → 13/03, 12 dias; 13 a 16 → `awaiting_payment`, sem atraso; soma de dias úteis pula o fim de semana; `METRO_CITIES` configurável; nenhum código usa `date.today()` direto (tudo via `today()`); sem e-mail/telefone no retorno | vermelho |
 | 10 | `feat(tools): order lookup with customer isolation` | `identify_customer(phone)`, `get_my_orders` (ranking em SQL, campos de prazo e atraso), `today()`, injeção de `customer_id` | verde |
