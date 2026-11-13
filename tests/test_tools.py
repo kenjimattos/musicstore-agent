@@ -296,3 +296,21 @@ def test_list_categories_counts_active_products_and_keeps_empty_ones(ready):
     assert cats["Instrumentos de Sopro (Madeiras)"] == 0
     assert cats["Instrumentos de Sopro (Metais)"] == 0
     assert cats["Cordas Orquestrais"] == 0
+
+
+# ---------- ordem: o que está à venda vem antes ----------
+
+
+def test_available_products_come_before_unavailable_ones(ready):
+    # sem o filtro, um "em breve" mais barato não pode ficar na frente de produto à venda (nem ocupar a vaga dele)
+    result = tools.search_products(category="Ukuleles", only_available=False)
+    order = [p["availability"] == "available" for p in result["products"]]
+    assert by_id(result, 130)["availability"] == "coming_soon"
+    assert order == sorted(order, reverse=True), "disponíveis precisam vir antes dos demais"
+
+
+def test_within_each_group_the_order_is_still_by_price(ready):
+    result = tools.search_products(category="Ukuleles", only_available=False)
+    for group in (True, False):
+        prices = [p["price_brl"] for p in result["products"] if (p["availability"] == "available") is group]
+        assert prices == sorted(prices)
