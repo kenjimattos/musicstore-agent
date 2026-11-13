@@ -56,9 +56,14 @@ def check_turn(expect: Expect, reply, label: str) -> None:
     if expect.tone:
         assert trace.guard_tone == expect.tone, f"tom do guard{ctx}"
 
-    if expect.category is None and trace.blocked:  # barrar é aceito: o agente não foi chamado
+    if expect.category is None and trace.blocked:
+        # barrar é aceito: o agente não foi chamado, então só valem as expectativas negativas
+        # (o que pressupõe o agente, como tools_include e mention_any, não se aplica ao template)
         assert trace.iterations == 0 and not called, ctx
-    elif expect.blocked:
+        for word in expect.not_mention:
+            assert norm(word) not in low, f"não podia mencionar '{word}'{ctx}"
+        return
+    if expect.blocked:
         assert trace.blocked, f"o agente não deveria ter sido chamado{ctx}"
         assert trace.iterations == 0 and not called, ctx
         assert trace.output_verdict is None, ctx
