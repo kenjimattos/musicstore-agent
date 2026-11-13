@@ -123,7 +123,7 @@ SCENARIOS: tuple[Scenario, ...] = (
                 "me arrependi da compra, posso devolver?",
                 Expect(
                     calls={"get_my_orders": 1},
-                    mention_all=("Ana", "BRJL5544332BR"),
+                    mention_all=("Ana",),
                     mention_any=("atras", "previs"),
                 ),
             ),
@@ -417,6 +417,20 @@ SCENARIOS: tuple[Scenario, ...] = (
         ),
     ),
     # ---------- Pedido atrasado e encaminhamento para a equipe ----------
+    Scenario(
+        id="ana_tracking_code",
+        title="Ana pergunta pelo código de rastreio do pedido enviado: a resposta traz o código da tool",
+        phone=ANA,
+        turns=(
+            Turn(
+                "qual o código de rastreio do meu pedido?",
+                Expect(
+                    tools_include=("get_my_orders",),
+                    mention_all=("BRJL5544332BR",),
+                ),
+            ),
+        ),
+    ),
     Scenario(
         id="ana_late_order_escalation",
         title="Ana pergunta pelo pedido atrasado: chamado aberto sem pedir confirmação, sem prometer nada",

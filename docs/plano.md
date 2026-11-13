@@ -504,7 +504,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 2. "Quanto custa o Takamine GD20?" e depois "e no PIX?" (multi-turn + regra do PIX).
 3. A cliente Ana (identificada pelo número) escreve "me arrependi da compra, posso devolver?". O agente chama `get_my_orders()` e recebe o pedido 8 em detalhe.
    - Pelos dados, o pedido está `shipped`, com previsão de entrega em 28/02. Em relação à `REFERENCE_DATE`, `is_late=true`: ele ainda não chegou e está atrasado.
-   - O agente precisa combinar dados e política: o direito de arrependimento conta a partir do recebimento (seção 4.1); passar o código de rastreio; reconhecer o atraso e encaminhar à equipe.
+   - O agente precisa combinar dados e política: o direito de arrependimento conta a partir do recebimento (seção 4.1); reconhecer o atraso e encaminhar à equipe. O código de rastreio não é exigido aqui, porque a pergunta é sobre devolução; ele é testado no cenário `ana_tracking_code`.
    - É o cenário não trivial, e mais interessante do que um "sim, pode devolver".
 4. Produto sem estoque/descontinuado → alternativas vindas da tool. O cliente chega irritado ("já é a terceira vez que pergunto!"), o que mostra o tom `frustrated` em ação.
 5. Guardrails:
@@ -535,6 +535,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
   - **a busca sem resultado:** um pedido que o filtro não atende (violão de nylon eletroacústico abaixo de um preço que nenhum cumpre). O `trace` mostra a 1ª busca vazia e **uma** 2ª busca, sem o `specs`; a resposta diz que o filtro foi aberto, cita só produtos vindos da tool e o turno usa no máximo 3 idas ao modelo. Um 2º cenário pede algo que nem a busca aberta atende e confere que a resposta diz que não há itens assim, sem produto inventado.
   - **pedido atrasado e encaminhamento:**
     - Ana pergunta "cadê meu pedido?": `get_my_orders` e `escalate_to_team` (motivo `atraso`, pedido 8) no mesmo turno, sem pedir confirmação; a resposta reconhece o atraso, traz o rastreio e o protocolo `ATD-…` da tool e o retorno em até 24h úteis; **não** promete nova data, cancelamento nem reembolso;
+    - Ana pergunta "qual o código de rastreio do meu pedido?" (`ana_tracking_code`): a resposta traz o código que veio de `get_my_orders`, mesmo com o pedido atrasado e o chamado aberto. O manual (seção 5.3) não obriga o atendente a informar o código, mas é a resposta direta à pergunta;
     - Ana reclama de novo no turno seguinte: o mesmo protocolo, sem chamado novo;
     - o cliente do pedido 9 (confirmado, Campo Grande) pergunta pelo pedido: a resposta diz que ele ainda não foi enviado, que passou do prazo da região (até 3 dias úteis) e encaminha;
     - o cliente do pedido 16 (pendente): a resposta explica que o pedido aguarda a confirmação do pagamento, **sem** chamado aberto;

@@ -53,3 +53,4 @@ sequence of decisions and corrections stays readable.
 39. **Test:** product search lists available products before unavailable ones (price order inside each group); red until the implementation lands.
 40. **Added:** product search lists products on sale before unavailable ones (price order inside each group), so unavailable products never take the place of available ones in the top 10.
 41. **Fixed:** the agent no longer answers "not found" for discontinued or coming-soon products: for a specific product it searches with `only_available` off; for recommendations it offers what is on sale first and only then coming-soon and out-of-stock items, never promising a restock.
+42. **Test:** `ana_regret_late_order` no longer requires the tracking code (the question is about returns); new scenario `ana_tracking_code` asks for it directly, and the plan records that the manual does not require it. Red for now: the agent often answers with the ticket protocol only.
