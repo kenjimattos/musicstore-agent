@@ -184,9 +184,9 @@ Princípio: **todo fato verificável na resposta precisa ter uma fonte**. As fon
      - Para não haver conta feita "de cabeça", as tools já devolvem os valores derivados: preço promocional, preço no PIX e parcelamento máximo permitido com o valor da parcela, seguindo as regras da seção 3.1 do manual.
      - Assim, qualquer R$ calculado pelo LLM reprova.
    - **Nomes de produto do catálogo:** se a resposta menciona um produto, ele precisa ter vindo de uma tool. Isso impede sugerir ou recomendar produto sem consulta.
-   - **Códigos de rastreio (`BR…BR`), números de pedido, números de protocolo de exclusão de dados (`LGPD-…`), quantidades de estoque, telefones e e-mails:** precisam existir nas fontes.
+   - **Códigos de rastreio (`BR…BR`), números de pedido, números de protocolo de exclusão de dados (`LGPD-…`) e de chamado (`ATD-…`), datas e prazos de entrega, quantidades de estoque, telefones e e-mails:** precisam existir nas fontes.
    - **Percentuais de desconto:** precisam vir de promoção ativa ou do PIX (5%).
-2. **Se reprovar:** volta ao loop do agente com feedback objetivo ("o valor R$ 1.850,00 não aparece em nenhuma consulta; consulte a tool ou remova"), com 1 retry. Se reprovar de novo, o `safe_fallback` responde: "não consegui confirmar essa informação, vou encaminhar para a equipe" + telefone da loja.
+2. **Se reprovar:** volta ao loop do agente com feedback objetivo ("o valor R$ 1.850,00 não aparece em nenhuma consulta; consulte a tool ou remova"), com 1 retry. Se reprovar de novo, o `safe_fallback` **abre um chamado pelo código** (`escalate_to_team`, motivo `outro`) e responde: "não consegui confirmar essa informação, encaminhei para a equipe (protocolo ATD-…)" + telefone da loja.
 3. **O que o determinístico não pega:** alucinação puramente semântica sem número nem nome, como uma regra inventada em texto livre. Isso é coberto por:
    - prompt restritivo ("só afirme sobre a loja o que está no manual ou em tools; se não souber, diga que vai verificar com a equipe").
    O README documenta esse trade-off de custo × cobertura.
@@ -228,6 +228,26 @@ O manual (seção 9) diz que o cliente pode pedir a exclusão dos seus dados pel
   - `messages` e `audit_log` guardam dados pessoais da conversa;
   - pedidos com obrigação fiscal seriam anonimizados, não apagados;
   - um novo export de CSV recriaria o cliente apagado, então a exclusão precisa acontecer no sistema de origem.
+
+### Encaminhamento para a equipe, simulado
+O agente diz "vou encaminhar à equipe" em vários fluxos: atraso, reclamação, valor contestado e o `safe_fallback`. Sem um mecanismo por trás, essa é uma promessa vazia ao cliente. **No protótipo, o encaminhamento é simulado: um chamado é registrado com protocolo e fica visível no painel do avaliador, mas ninguém é notificado.**
+
+- **Tool `escalate_to_team(reason, summary, order_id?)`.**
+  - `reason` é um enum: `atraso`, `reclamacao`, `valor_contestado`, `outro`. `summary` é um resumo curto escrito pelo modelo, com no máximo 300 caracteres (validado), e sempre gravado como dado com SQL parametrizado.
+  - **Identidade injetada pelo código:** cliente identificado → `customer_id`; visitante → o **telefone do canal**, que é o contato que a equipe usaria para retornar. Nenhum dos dois é argumento do modelo.
+  - **`order_id` validado:** se o cliente é identificado, o pedido precisa ser dele; se for de outro, a tool rejeita. O visitante abre chamado sem pedido vinculado, e o número do pedido pode ir no resumo, para a equipe verificar.
+  - Grava em `support_tickets` (`ticket_id`, `customer_id` ou `phone`, `order_id`, `reason`, `summary`, `thread_id`, `created_at`, `status = 'open'`) com a mesma função de escrita restrita a `INSERT`.
+  - Devolve um **protocolo** (`ATD-000034`) e o prazo de retorno **das políticas**: "até 24 horas úteis" (seção 7.3). Como o prazo vem no resultado da tool, o output_guard aceita que ele apareça na resposta.
+  - **Idempotente:** se já existe um chamado aberto com o mesmo cliente (ou telefone), o mesmo `order_id` e o mesmo `reason`, devolve o protocolo existente. Reclamar duas vezes do mesmo atraso não abre dois chamados.
+- **Quando o agente chama a tool, sem pedir confirmação:**
+  - pedido atrasado (`is_late = true`) e o cliente pergunta sobre ele;
+  - reclamação;
+  - valor de pedido contestado (itens 9 a 12 da tabela de conflitos);
+  - pedido de falar com uma pessoa.
+- **`safe_fallback` deixa de ser vazio:** quando a resposta reprova duas vezes no output_guard, **o código** (não o modelo) abre um chamado com `reason = 'outro'` e o resumo da pergunta. A resposta de fallback já traz o protocolo.
+- **Output guard:** o protocolo `ATD-…` entra na lista de códigos que só podem aparecer se vierem da tool do turno.
+- **Painel do avaliador:** mostra os chamados do cliente selecionado (protocolo, motivo, pedido, resumo, data).
+- **Em produção (README, limitações):** o chamado iria para um helpdesk ou para a fila de atendimento humano no próprio WhatsApp, com notificação à equipe e acompanhamento do SLA de 24h úteis.
 
 ### Auditoria
 A tabela `audit_log` no mesmo banco registra uma linha por turno com:
@@ -321,6 +341,17 @@ musicstore-agent/
    - O `customer_id` vem do telefone e é injetado pelo código; nunca é argumento do modelo.
 4. `list_categories()`: lista as categorias com contagem de produtos ativos, incluindo as vazias.
 5. `request_data_deletion()`: registra um pedido de exclusão de dados (**simulação**, nada é apagado). Sem argumentos; só para cliente identificado; idempotente. Detalhes em "Exclusão de dados (LGPD), simulada".
+6. `escalate_to_team(reason, summary, order_id?)`: **encaminha o atendimento para a equipe** (simulação: registra um chamado, não notifica ninguém). Detalhes em "Encaminhamento para a equipe, simulado".
+
+**Regra no prompt para atraso de entrega:** usar só os campos da tool (`is_late`, `days_late`, `expected_by`, `deadline_source`).
+- Se o pedido **não está atrasado**, informar o status e o prazo esperado.
+- Se o pedido **está atrasado**:
+  - acalmar o cliente: reconhecer o atraso primeiro, sem brincadeira, e pedir desculpas em nome da loja;
+  - dar o que existe de concreto: status, rastreio se houver, e quantos dias passou do prazo;
+  - chamar `escalate_to_team` **sem pedir confirmação**, porque não é uma ação destrutiva;
+  - responder com o protocolo e o prazo de retorno devolvido pela tool.
+- **Nunca:** prometer nova data, oferecer cancelamento, reembolso ou compensação (o manual não tem regra para isso), ou afirmar o meio de entrega.
+- **Pedido pendente:** explicar que aguarda a confirmação do pagamento. Não há atraso de entrega a acusar.
 
 **Regra no prompt para exclusão de dados:** reconhecer o pedido com seriedade, explicar em uma frase o que será registrado, pedir confirmação explícita e só então chamar a tool. Nunca prometer prazo nem que tudo será apagado.
 
@@ -400,7 +431,8 @@ musicstore-agent/
 - **Painel "Dados do cliente (visão do avaliador)":** fica na sidebar, abaixo do seletor, lendo direto do banco. Mostra:
   - nome, telefone, e-mail e cidade;
   - uma tabela com os pedidos do cliente: id, data, status, total, itens, rastreio e previsão de entrega;
-  - as **solicitações de exclusão de dados** do cliente (protocolo, data, status), com o aviso de que os dados continuam no banco, por ser uma simulação.
+  - as **solicitações de exclusão de dados** do cliente (protocolo, data, status), com o aviso de que os dados continuam no banco, por ser uma simulação;
+  - os **chamados abertos para a equipe** (protocolo, motivo, pedido, resumo, data).
 - **Aviso no topo da página:** "Data simulada: 25/03/2026, para coincidir com os dados do exercício."
 
   Serve para conferir se o agente respondeu certo. Por exemplo: a Ana pergunta pelo pedido dela e o avaliador compara a resposta com a tabela.
@@ -455,6 +487,13 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     - Por isso a fixture do teste insere pedidos extras **só na cópia temporária dos CSVs**, sem alterar `data/`. (Na cópia e não no banco, porque o re-ingest por mtime apagaria linhas inseridas direto no banco.)
     - A mesma fixture cobre o "sim, pode devolver": um pedido entregue há 3 dias. Nenhum pedido real cai na janela de 7 dias na `REFERENCE_DATE`.
   - a memória: "e no PIX?" no 2º turno é respondido sem repetir o nome do produto.
+  - **pedido atrasado e encaminhamento:**
+    - Ana pergunta "cadê meu pedido?": `get_my_orders` e `escalate_to_team` (motivo `atraso`, pedido 8) no mesmo turno, sem pedir confirmação; a resposta reconhece o atraso, traz o rastreio e o protocolo `ATD-…` da tool e o retorno em até 24h úteis; **não** promete nova data, cancelamento nem reembolso;
+    - Ana reclama de novo no turno seguinte: o mesmo protocolo, sem chamado novo;
+    - o cliente do pedido 9 (confirmado, Campo Grande) pergunta pelo pedido: a resposta diz que ele ainda não foi enviado, que passou do prazo da região (até 3 dias úteis) e encaminha;
+    - o cliente do pedido 16 (pendente): a resposta explica que o pedido aguarda a confirmação do pagamento, **sem** chamado aberto;
+    - a resposta nunca diz "simulação" e cita só a data de hoje que veio no prompt;
+    - o `safe_fallback`, forçado por uma resposta que reprova duas vezes, cria um chamado e devolve o protocolo.
   - **a exclusão de dados (simulada):**
     - Ana escreve "quero que vocês apaguem meus dados". O agente **pergunta se ela confirma, sem chamar a tool** (o `trace` do turno não tem `request_data_deletion`). Com "sim", chama a tool **uma vez**, responde com o protocolo e **não promete prazo nem que tudo será apagado**;
     - os dados da Ana continuam no banco depois do pedido, e a resposta não diz que foram apagados;
@@ -498,8 +537,8 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 | 8 | `feat(tools): product search and details` | `search_products`, `get_product_details`, `list_categories` + repositório | verde |
 | 9 | `test(tools): order lookup and customer isolation` | `identify_customer` acha a Ana por "(67) 99654-7821" e por "67996547821", e um número desconhecido vira visitante; Ana vê o pedido 8 em detalhe com `is_late=true`; Ana pedindo o 14 → não encontrado; visitante com e-mail errado → negado; **cadastros parecidos:** os telefones de Bruno 11 e Bruno 43 resolvem para ids diferentes; Bruno 43 pedindo o pedido 10 (do Bruno 11) → não encontrado, mesmo informando o e-mail que os dois compartilham; visitante com pedido 10 + `bruno.martins@jmail.com` → liberado, porque o e-mail é do dono do pedido; Diego 47 pedindo o 14 (do Diego 13) → não encontrado; **ranking:** com pedidos sintéticos na fixture, a ordem é aberto > entregue recente > antigo/cancelado, com no máximo 5 no resumo e `total_orders` correto; `days_since_delivery` com `REFERENCE_DATE`; **prazos e atrasos em 25/03/2026:** pedido 8 → `expected_by` 28/02, fonte `pedido`, 25 dias de atraso; 9 → 25/02, fonte `politica`, região `metropolitana`, 28 dias; 10 → 13/03, `outras_cidades`, 12 dias; 11 → 10/03, 15 dias; 12 → 13/03, 12 dias; 13 a 16 → `awaiting_payment`, sem atraso; soma de dias úteis pula o fim de semana; `METRO_CITIES` configurável; nenhum código usa `date.today()` direto (tudo via `today()`); sem e-mail/telefone no retorno | vermelho |
 | 10 | `feat(tools): order lookup with customer isolation` | `identify_customer(phone)`, `get_my_orders` (ranking em SQL, campos de prazo e atraso), `today()`, injeção de `customer_id` | verde |
-| 10b | `test(tools): simulated data deletion request` | `request_data_deletion` para a Ana cria uma linha em `data_requests` com status `pending` e devolve protocolo; **os dados dela não mudam** (`customers`, `orders` e `messages` idênticos antes e depois); segunda chamada devolve o mesmo protocolo (idempotente); visitante → orientação, sem escrever nada; o `customer_id` não está no JSON Schema da tool; as consultas continuam na conexão somente leitura (escrever por ela falha); re-ingest de CSV não apaga `data_requests`. Também entra em `scenarios.py` o cenário e2e de exclusão. Sub-passo de TDD sem renumerar a tabela | vermelho |
-| 10c | `feat(tools): simulated data deletion request` | tabela `data_requests`, função de repositório com a conexão de escrita (só `INSERT`), `request_data_deletion` + schema + dispatch | verde |
+| 10b | `test(tools): simulated write tools (data deletion and escalation)` | **Encaminhamento:** `escalate_to_team` para a Ana com o pedido 8 cria um chamado `open` e devolve protocolo `ATD-…` e "até 24 horas úteis"; a mesma chamada de novo devolve o mesmo protocolo; a Ana com o pedido 14 (do Diego) → rejeitado, sem escrever nada; o visitante abre o chamado com o telefone do canal e sem pedido vinculado; `summary` acima de 300 caracteres → erro de validação; `reason` fora do enum → erro; nenhum dado de `customers`/`orders` muda. **Exclusão:** `request_data_deletion` para a Ana cria uma linha em `data_requests` com status `pending` e devolve protocolo; **os dados dela não mudam** (`customers`, `orders` e `messages` idênticos antes e depois); segunda chamada devolve o mesmo protocolo (idempotente); visitante → orientação, sem escrever nada; o `customer_id` não está no JSON Schema da tool; as consultas continuam na conexão somente leitura (escrever por ela falha); re-ingest de CSV não apaga `data_requests` nem `support_tickets`. Também entram em `scenarios.py` os cenários e2e de exclusão e de atraso. Sub-passo de TDD sem renumerar a tabela | vermelho |
+| 10c | `feat(tools): simulated write tools (data deletion and escalation)` | tabelas `data_requests` e `support_tickets`, funções de repositório com a conexão de escrita (só `INSERT`), `request_data_deletion` e `escalate_to_team` + schemas + dispatch | verde |
 | 11 | `test(guards): deterministic output guard` | R$ inventado reprova; produto não consultado reprova; valores da tool aprovam; código de rastreio inventado reprova | vermelho |
 | 12 | `feat(guards): deterministic output guard` | `output_guard` | verde |
 | 12b | `test(agent): history window` | `tests/test_history.py`: janela de 10 turnos, corte sempre em mensagem do usuário (sem separar `tool_use` de `tool_result`), `tool_result` antigo trocado pelo marcador, `tool_result` do turno atual intacto. Sem LLM. (Sub-passo de TDD sem renumerar a tabela.) | vermelho |
@@ -551,6 +590,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 - Tratamento de dados e suposições.
 - Limitações e próximos passos:
   - Postgres (mudança isolada em `db.py`);
+  - **encaminhamento real:** hoje o chamado só fica registrado. Em produção, ele iria para um helpdesk ou para a fila de atendimento humano do WhatsApp, com notificação à equipe e acompanhamento do SLA de 24h úteis;
   - **data simulada:** `REFERENCE_DATE` existe só porque os dados são de março de 2026. Em produção, `today()` passa a usar a data real e a variável é removida;
   - **prazo de despacho:** o manual não define. Hoje o prazo da política conta a partir da data do pedido; com uma data de confirmação do pagamento na base, o cálculo ficaria exato;
   - **exclusão de dados real (LGPD):** hoje é só o registro do pedido. Em produção, uma fila tratada pela equipe, com verificação de identidade, cobrindo também `messages` e `audit_log`, anonimizando pedidos com obrigação fiscal e apagando no sistema de origem, porque um novo export de CSV recriaria o cliente;
@@ -581,7 +621,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     | Tema | Proposta inicial | Questionamento | Decisão final |
     |---|---|---|---|
     | Tools de pedido | `list_my_orders` + `get_order_status` (lista + detalhe) | "A tabela é pequena, por que separar?" A separação custava uma ida extra ao modelo no caso mais comum. "E se trouxer só o último pedido?" "E quando a base crescer?" | Uma tool `get_my_orders`, com ranking em SQL (aberto > entregue recente > resto), o 1º em detalhe, até 5 resumidos e `total_orders` |
-    | Orquestração | LangGraph (StateGraph) | Overengineering para o problema: 5 tools e um fluxo linear (guard → agente → guard) cabem num loop de ~40 linhas; o framework adicionaria abstração sem resolver nada que o código simples não resolva | Loop explícito com o SDK `anthropic`, com o fluxo separado em etapas, pronto para virar grafo se a orquestração crescer (multi-agente, handoff humano) |
+    | Orquestração | LangGraph (StateGraph) | Overengineering para o problema: 6 tools e um fluxo linear (guard → agente → guard) cabem num loop de ~40 linhas; o framework adicionaria abstração sem resolver nada que o código simples não resolva | Loop explícito com o SDK `anthropic`, com o fluxo separado em etapas, pronto para virar grafo se a orquestração crescer (multi-agente, handoff humano) |
     | Guard de saída | Juiz LLM | Custo de uma chamada extra por turno | Checagem determinística de fatos (R$, produtos, códigos), com as tools devolvendo os valores já calculados |
     | Banco | CSVs em memória → SQLAlchemy | Migração futura para banco; "precisa de SQLAlchemy?" | `sqlite3` + padrão de repositório + queries parametrizadas e conexão somente leitura nas tools |
     | Modelo | Sonnet no agente, Haiku no guard | Economia de tokens | Haiku em tudo, viabilizado por tools que fazem as contas e pelo guard determinístico |
