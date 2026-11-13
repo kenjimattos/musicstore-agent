@@ -75,3 +75,4 @@ sequence of decisions and corrections stays readable.
 61. **Test:** e2e runs can record every turn (message, reply, guard decision, tools, retries, guard violations, pass/fail) as JSONL when `E2E_RECORD_DIR` is set; `scripts/e2e_baseline.sh [N]` runs the full e2e N times into `e2e-runs/<timestamp>/` (git-ignored) and `scripts/e2e_report.py` writes the pass rate per scenario.
 62. **Test:** output guard: a numbered list on the line after the word "pedido" ("1. O número do pedido
 2. O e-mail") is not read as order 2; order numbers on the same line are still checked. Red until the fix lands.
+63. **Fixed:** output guard order-number pattern no longer crosses a line break, so a numbered list after "pedido" is not flagged as an invented order.

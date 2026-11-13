@@ -78,7 +78,8 @@ MONEY_TOLERANCE = 0.01
 _MONEY = re.compile(r"R\$\s*(\d+(?:\.\d{3})*(?:,\d{1,2})?)")
 _TRACKING = re.compile(r"\bBR[A-Z0-9]{6,}BR\b", re.I)
 _PROTOCOL = re.compile(r"\b(?:ATD|LGPD)-\d+\b", re.I)
-_ORDER = re.compile(r"(?:pedido|ordem)\s*(?:n[º°o.]*\s*)?#?\s*(\d+)|#\s*(\d+)", re.I)
+# só espaço/tab entre "pedido" e o número: o "2." de uma lista na linha seguinte não é o pedido 2
+_ORDER = re.compile(r"(?:pedido|ordem)[ \t]*(?:n[º°o.]*[ \t]*)?#?[ \t]*(\d+)|#[ \t]*(\d+)", re.I)
 _PHONE = re.compile(r"(?<![\w.,/-])(?:\(?\d{2}\)?[\s-]?)?9?\d{4}[-\s]?\d{4}(?!\d)")
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _DATE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b|\b(\d{2})/(\d{2})\b")
