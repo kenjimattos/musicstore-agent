@@ -302,15 +302,23 @@ def test_list_categories_counts_active_products_and_keeps_empty_ones(ready):
 
 
 def test_available_products_come_before_unavailable_ones(ready):
-    # sem o filtro, um "em breve" mais barato não pode ficar na frente de produto à venda (nem ocupar a vaga dele)
-    result = tools.search_products(category="Ukuleles", only_available=False)
+    # o Ibanez Bass 2X (136, descontinuado) é o baixo mais barato, mas não pode ficar na frente de quem está à venda
+    result = tools.search_products(category="Baixos", only_available=False)
+    assert by_id(result, 136)["availability"] == "discontinued"
     order = [p["availability"] == "available" for p in result["products"]]
-    assert by_id(result, 130)["availability"] == "coming_soon"
     assert order == sorted(order, reverse=True), "disponíveis precisam vir antes dos demais"
+    assert result["products"][-1]["product_id"] == 136
 
 
 def test_within_each_group_the_order_is_still_by_price(ready):
-    result = tools.search_products(category="Ukuleles", only_available=False)
+    result = tools.search_products(category="Baixos", only_available=False)
     for group in (True, False):
         prices = [p["price_brl"] for p in result["products"] if (p["availability"] == "available") is group]
         assert prices == sorted(prices)
+
+
+def test_unavailable_products_never_take_the_place_of_available_ones(ready):
+    # 33 violões à venda e 2 indisponíveis mais baratos que muitos deles: o corte de 10 só traz os à venda
+    result = tools.search_products(category="Violões", only_available=False)
+    assert len(result["products"]) == 10
+    assert all(p["availability"] == "available" for p in result["products"])

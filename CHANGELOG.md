@@ -51,3 +51,4 @@ sequence of decisions and corrections stays readable.
 37. **Test:** input guard classifier (manipulation, out of scope, store subjects that must pass, context follow-ups, tone, length limit); needs the API, red until the implementation lands.
 38. **Added:** input guard: Haiku classifier with structured output (scope, manipulation, tone), length limit and fixed refusal templates; wired into `respond()` before the agent, with the tone passed to the prompt.
 39. **Test:** product search lists available products before unavailable ones (price order inside each group); red until the implementation lands.
+40. **Added:** product search lists products on sale before unavailable ones (price order inside each group), so unavailable products never take the place of available ones in the top 10.

@@ -102,7 +102,7 @@ def _product_filters(
 def find_products(conn, *, query=None, category_id=None, specs=None, min_price=None,
                   max_price=None, only_available=True, limit=10) -> list[dict]:
     where, params = _product_filters(query, category_id, specs, min_price, max_price, only_available)
-    sql = _PRODUCT_SELECT + where + " ORDER BY p.price_brl, p.product_id LIMIT :limit"
+    sql = _PRODUCT_SELECT + where + " ORDER BY (p.status = 'active' AND p.stock_quantity > 0) DESC, p.price_brl, p.product_id LIMIT :limit"
     return _rows(conn.execute(sql, {**params, "limit": limit}))
 
 
