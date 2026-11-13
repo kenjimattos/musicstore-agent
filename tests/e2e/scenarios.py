@@ -19,6 +19,7 @@ REFERENCE_DATE = "2026-03-25"
 ANA = "(67) 99654-7821"  # cliente 2: pedido 8 shipped, atrasado
 PEDRO = "67984321098"  # cliente 3: recebe 2 pedidos entregues (EXTRA_ORDERS)
 LUCAS = "(67) 99812-3456"  # cliente 1: recebe 1 pedido entregue há 3 dias (EXTRA_ORDERS)
+GUSTAVO = "(67) 98098-7654"  # cliente 17: pedido 18 cancelado (12x no cartão)
 VISITOR = "67900000000"  # não está em customers.csv
 
 # Pedidos extras, só na cópia temporária dos CSVs (nunca em data/).
@@ -316,13 +317,32 @@ SCENARIOS: tuple[Scenario, ...] = (
         ),
     ),
     Scenario(
+        id="policy_refund_other_cases",
+        title="Reembolso fora do arrependimento: sem prazo nem promessa, encaminha à equipe",
+        phone=GUSTAVO,
+        turns=(
+            Turn(
+                "meu pedido foi cancelado, quando eu recebo o dinheiro de volta?",
+                Expect(
+                    tools_include=("get_my_orders", "escalate_to_team"),
+                    not_mention=("10 dias uteis", "sera reembolsado", "vamos reembolsar"),
+                ),
+            ),
+        ),
+    ),
+    Scenario(
         id="policy_defect_after_30_days",
-        title="Defeito depois dos 30 dias: informa os 90 dias e encaminha à equipe",
+        title="Defeito depois dos 30 dias: segue o manual; se o cliente insiste, vai para a equipe",
         phone=VISITOR,
         turns=(
             Turn(
                 "comprei um violão há 2 meses e apareceu um defeito de fabricação, quem resolve?",
-                Expect(tools_include=("escalate_to_team",), mention_all=("90 dias",)),
+                # manual: troca na loja até 30 dias; depois, fabricante, e a loja pode intermediar. Sem chamado ainda
+                Expect(mention_all=("fabricante",), mention_any=("30 dias",), not_mention=("troca em ate 90",)),
+            ),
+            Turn(
+                "isso é um absurdo, quero que a loja resolva, vou reclamar",
+                Expect(tone="frustrated", tools_include=("escalate_to_team",)),
             ),
         ),
     ),

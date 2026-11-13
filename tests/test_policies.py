@@ -174,7 +174,10 @@ def test_promotion_does_not_remove_defect_or_regret_rights(md):
     assert "parcela mínima de R$ 100,00" not in md.split("### 3.1")[0]  # resumo da seção 3 não contradiz a 3.1
 
 
-def test_refund_deadline_and_defect_after_30_days_are_explicit(md):
-    assert "10 dias úteis, contados a partir da confirmação do recebimento da solicitação de devolução pela loja" in md
-    assert "dentro dos 90 dias da garantia legal, o cliente pode registrar a reclamação por defeito na loja" in md
-    assert "deve acionar a garantia diretamente com o fabricante" not in md  # contradizia a garantia legal de 90 dias
+def test_refund_is_only_promised_for_regret_returns_and_defect_follows_the_manual(md):
+    assert "O reembolso da devolução por arrependimento é feito" in md
+    assert "contados a partir da confirmação do recebimento da solicitação de devolução pela loja" in md
+    assert md.count("reembolso") == 1  # só aqui; o resto é "reembolsadas" (diferença de valor na troca)
+    # defeito: vale o manual (30 dias; depois, fabricante, com a loja intermediando), sem prometer o CDC
+    assert "Passados os 30 dias, o cliente deve acionar a garantia diretamente com o fabricante" in md
+    assert "dentro dos 90 dias da garantia legal, o cliente pode registrar" not in md

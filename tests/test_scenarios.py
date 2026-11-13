@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 
 from tests.e2e.helpers import brl_values, digits, norm
-from tests.e2e.scenarios import ANA, EXTRA_ORDER_ITEMS, EXTRA_ORDERS, LUCAS, PEDRO, SCENARIOS, VISITOR
+from tests.e2e.scenarios import ANA, EXTRA_ORDER_ITEMS, EXTRA_ORDERS, GUSTAVO, LUCAS, PEDRO, SCENARIOS, VISITOR
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 
@@ -25,6 +25,7 @@ def test_phones_match_the_intended_customers():
     assert by_phone[digits(ANA)].startswith("Ana Carolina")
     assert by_phone[digits(PEDRO)].startswith("Pedro Henrique")
     assert by_phone[digits(LUCAS)].startswith("Lucas Mendes")
+    assert by_phone[digits(GUSTAVO)].startswith("Gustavo Teixeira")
     assert digits(VISITOR) not in by_phone
 
 

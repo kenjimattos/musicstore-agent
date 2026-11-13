@@ -49,13 +49,13 @@ A loja segue as diretrizes do Código de Defesa do Consumidor (Lei nº 8.078/90)
 
 - O cliente pode solicitar a devolução em até 7 dias corridos após o recebimento do produto, sem precisar de justificativa.
 - O produto deve estar na embalagem original, sem sinais de uso, com todos os acessórios e manuais.
-- O reembolso é feito na mesma forma de pagamento original, em até 10 dias úteis, contados a partir da confirmação do recebimento da solicitação de devolução pela loja.
+- O reembolso da devolução por arrependimento é feito na mesma forma de pagamento original, em até 10 dias úteis, contados a partir da confirmação do recebimento da solicitação de devolução pela loja.
 - O frete de devolução, em caso de arrependimento, é por conta da loja.
 
 ### 4.2 Troca por defeito
 
 - Produtos com defeito de fabricação podem ser trocados em até 30 dias corridos após o recebimento do produto.
-- Passados os 30 dias, e dentro dos 90 dias da garantia legal, o cliente pode registrar a reclamação por defeito na loja, que a encaminha à equipe. Também pode acionar a garantia diretamente com o fabricante, e a loja pode intermediar o processo, mediante solicitação.
+- Passados os 30 dias, o cliente deve acionar a garantia diretamente com o fabricante. A loja pode intermediar o processo, mediante solicitação.
 - Danos causados por mau uso, quedas, exposição a umidade excessiva ou modificações não autorizadas não são cobertos.
 
 ### 4.3 Troca por preferência
