@@ -142,7 +142,13 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
 - **Ingestão (`agent/ingest.py`):**
   - Os CSVs continuam sendo o formato que a loja edita: export do Sheets.
   - O ingest valida as colunas, limpa os dados e grava as tabelas (`pandas.to_sql`, replace). **Só as 5 tabelas dos CSVs** são substituídas; `messages`, `audit_log` e `data_requests` nunca são tocadas, então um novo export não apaga histórico, auditoria nem pedidos de exclusão.
-  - Roda no startup e sempre que o mtime de algum CSV for mais novo que a última importação. A checagem é barata e roda a cada consulta, o que preserva o "colar o CSV novo e pronto".
+  - **Roda só no startup**, nunca a cada consulta: `db.connect_ro()` só abre o banco, então os dados não mudam no meio de uma conversa. Colar um CSV novo vale **na próxima inicialização do app**; o README documenta o passo "colou o CSV, reinicie".
+  - **Regra do mtime, por CSV**, comparando com o mtime guardado na última importação (tabela `ingest_meta`):
+    - **mais novo:** reingere;
+    - **igual:** não faz nada;
+    - **mais antigo:** `IngestError`. A loja sempre cola um export novo, então uma data anterior indica o arquivo errado (por exemplo, um backup antigo).
+  - **Um CSV rejeitado, por data ou por validação, não derruba o agente:** `ingest.startup()` registra o erro no log e as consultas seguem com os últimos dados válidos. Sem banco anterior, o erro sobe, porque não há o que servir. Por enquanto basta o log, sem aviso na UI.
+  - **Limite assumido (README):** conteúdo diferente com o mesmo mtime não é detectado.
   - **É um adaptador de protótipo, e o README diz isso explicitamente.** Em produção, o `ingest.py` é substituído de uma destas formas:
     - pela leitura direta do sistema da loja (ERP ou e-commerce), via réplica de leitura ou API;
     - por um sync agendado, se a loja operar em planilhas. O nome dos CSVs sugere export do Google Sheets, então é um cenário realista para uma loja desse porte.
@@ -260,7 +266,7 @@ A tabela `audit_log` no mesmo banco registra uma linha por turno com:
 Serve para revisar abuso (de clientes ou funcionários) e respostas ruins.
 
 ## Atualização fácil de políticas e dados
-A loja substitui arquivos em `data/`, sem mexer em código e sem reiniciar o app.
+A loja substitui arquivos em `data/`, sem mexer em código. As políticas valem na próxima mensagem; os CSVs valem na próxima inicialização do app.
 - **Políticas:**
   - **a ingestão deixa de ser automática:** o agente lê `data/politicas.md`, não o PDF. Para atualizar, a loja edita esse arquivo de texto (mais fácil de editar que um PDF), sem mexer em código;
   - o arquivo é lido com cache por mtime e o system prompt é montado a cada invocação, então a nova versão vale na próxima mensagem, sem reiniciar o app;
@@ -268,7 +274,7 @@ A loja substitui arquivos em `data/`, sem mexer em código e sem reiniciar o app
   - **o custo dessa escolha:** um PDF novo da loja exige uma curadoria humana antes de valer. O README diz isso, junto com o que a curadoria faz (abaixo);
   - **proteção contra erro de transcrição:** um teste confere que todo valor em R$, percentual, horário e prazo em dias de `politicas.md` aparece também no texto do PDF original. Isso pega número digitado errado, mas não pega política desatualizada.
 - **Dados:**
-  - os CSVs são achados por sufixo (`*products.csv`…), então tanto o nome limpo atual (`products.csv`) quanto o nome do export do Google Sheets funcionam; basta re-exportar e colar;
+  - os CSVs são achados por sufixo (`*products.csv`…), então tanto o nome limpo atual (`products.csv`) quanto o nome do export do Google Sheets funcionam; basta re-exportar, colar e reiniciar o app (o ingest roda só no startup);
   - `DATA_DIR` é configurável por env.
 - **Validação no load:** checa as colunas obrigatórias. Se faltar alguma, gera um erro claro, em vez de deixar o agente responder errado.
 - **Limpeza:** toda limpeza acontece em código, então um novo export recebe o mesmo tratamento.
@@ -285,7 +291,7 @@ musicstore-agent/
 │   ├── prompts.py         # system prompt do agente + prompts dos guards
 │   ├── tools.py           # funções read-only + TOOL_SCHEMAS + dispatch
 │   ├── db.py              # sqlite3: conexões (ro p/ tools, rw p/ escrita) + repositório (SQL parametrizado)
-│   ├── ingest.py          # CSV → validar/limpar → tabelas; re-ingest por mtime
+│   ├── ingest.py          # CSV → validar/limpar → tabelas; roda só no startup (mtime mais antigo → erro)
 │   ├── policies.py        # lê data/politicas.md, cache por mtime
 │   └── audit.py           # insert em audit_log
 ├── data/                  # CSVs e PDF como recebidos; politicas.md (curado); store.db gerado (gitignore)
@@ -529,7 +535,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 |---|---|---|---|
 | 1 | `chore: project scaffold` | `git init`, `pyproject.toml` (uv, deps, markers `llm`/`e2e`, `addopts`), `.gitignore` (`.env`, `data/store.db`, `.venv`), `.env.example`, estrutura de pastas, README esqueleto, dados e PDF originais | verde (sem testes) |
 | 2 | `test(e2e): acceptance scenarios` | `tests/e2e/scenarios.py` + `test_conversations.py`. É a especificação do comportamento do agente, escrita antes de tudo. | verde no padrão; `-m e2e` vermelho até o commit 15 |
-| 3 | `test(data): ingest and validation` | `conftest.py` (tmp data + `DB_PATH`), `test_ingest.py` (tabelas criadas, coluna faltando → erro claro, re-ingest por mtime, `search_text` sem acento) | vermelho |
+| 3 | `test(data): ingest and validation` | `conftest.py` (tmp data + `DB_PATH`), `test_ingest.py` (tabelas criadas, coluna faltando → erro claro, reingestão por mtime só no startup, CSV com mtime mais antigo → erro, CSV rejeitado mantém o banco anterior e o agente segue, `search_text` sem acento) | vermelho |
 | 4 | `feat(data): ingest CSVs into SQLite` | `db.py` (conexões rw/ro), `ingest.py` | verde |
 | 5 | `test(data): curated policies` | `politicas.md` contém as seções-chave (horário, pagamento e parcelamento, arrependimento, frete); todo R$, %, horário e prazo em dias dele existe no texto do PDF; não contém marcas internas ("uso restrito", seção de atendimento); **não contém conteúdo que conflita com a base**: `3321-4500`, `empóriodamusica`, "300", as faixas de desconto (15%, 30%…) e o calendário de campanhas ("Volta às Aulas", "Semana do Músico"); cache por mtime | vermelho |
 | 6 | `feat(data): curated policies file and loader` | `data/politicas.md` (curadoria do manual) + `policies.py` | verde |

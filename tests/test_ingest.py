@@ -2,13 +2,18 @@
 
 Interface esperada (commit 4):
     ingest.ingest_all()      # lê os CSVs de DATA_DIR e recria as tabelas em DB_PATH
-    ingest.ensure_fresh()    # reingere se algum CSV mudou desde a última importação; True se ingeriu
+    ingest.ensure_fresh()    # chamada só no startup; compara o mtime de cada CSV com o da última importação:
+                             #   mais novo -> reingere (True); igual -> nada (False);
+                             #   mais antigo ou inválido -> IngestError, com o banco anterior intacto
+    ingest.startup()         # ensure_fresh() + log: CSV rejeitado mantém o banco anterior e o agente segue;
+                             #   sem banco anterior, o IngestError sobe (não há o que servir)
     ingest.IngestError       # ValueError com mensagem clara (arquivo, coluna ou linha)
     db.connect_rw()          # conexão de escrita (ingest, histórico, auditoria)
-    db.connect_ro()          # conexão somente leitura, a única que as tools usam
+    db.connect_ro()          # conexão somente leitura, a única que as tools usam; nunca reingere
 """
 
 import csv
+import logging
 import os
 import sqlite3
 import time
@@ -169,16 +174,19 @@ def test_reingests_when_a_csv_changes(store):
     assert query(store, "SELECT price_brl FROM products WHERE product_id = 95") == [(1999.9,)]
 
 
-def test_reingests_when_the_new_file_has_an_older_mtime(store):
-    """Export salvo/copiado preserva a data antiga: a mudança tem que ser detectada mesmo assim."""
+def test_rejects_a_csv_older_than_the_last_import(store):
+    """A loja sempre cola um export novo: data anterior à da última importação indica o arquivo
+    errado (ex.: um backup antigo). O ingest acusa o erro e o banco anterior continua intacto."""
     ingest.ensure_fresh()
+    path = store.data_dir / "promotions.csv"
+    imported_mtime = path.stat().st_mtime
     rows = csv_rows(store, "promotions.csv")
     rows[0]["is_active"] = "1"
     write_csv(store, "promotions.csv", rows)
-    long_ago = time.time() - 365 * 24 * 3600
-    os.utime(store.data_dir / "promotions.csv", (long_ago, long_ago))
-    assert ingest.ensure_fresh() is True
-    assert query(store, "SELECT is_active FROM promotions WHERE promotion_id = 1") == [(1,)]
+    os.utime(path, (imported_mtime - 3600, imported_mtime - 3600))
+    with pytest.raises(ingest.IngestError, match=r"promotions\.csv.*mais antigo"):
+        ingest.ensure_fresh()
+    assert query(store, "SELECT is_active FROM promotions WHERE promotion_id = 1") == [(0,)]
 
 
 def test_failed_reingest_keeps_the_previous_data(store):
@@ -193,7 +201,52 @@ def test_failed_reingest_keeps_the_previous_data(store):
     assert query(store, "SELECT COUNT(*), SUM(price_brl) FROM products") == before
 
 
+# ---------- startup: o ingest só roda aqui ----------
+
+
+def test_startup_ingests_on_first_run(store):
+    ingest.startup()
+    assert query(store, "SELECT COUNT(*) FROM products")[0][0] == len(csv_rows(store, "products.csv"))
+
+
+def test_startup_keeps_the_previous_data_and_logs_when_a_csv_is_rejected(store, caplog):
+    """CSV ruim não derruba o agente: o erro vai para o log e as consultas seguem com os últimos dados válidos."""
+    ingest.startup()
+    before = query(store, "SELECT COUNT(*), SUM(price_brl) FROM products")
+    rows = [{k: v for k, v in r.items() if k != "stock_quantity"} for r in csv_rows(store, "products.csv")]
+    write_csv(store, "products.csv", rows)
+    bump_mtime(store, "products.csv")
+    with caplog.at_level(logging.ERROR):
+        ingest.startup()  # não levanta
+    assert "stock_quantity" in caplog.text
+    assert query(store, "SELECT COUNT(*), SUM(price_brl) FROM products") == before
+
+
+def test_startup_without_a_previous_database_raises(store):
+    """Sem dados válidos anteriores não há o que servir: aí o erro tem que subir."""
+    rows = [{k: v for k, v in r.items() if k != "stock_quantity"} for r in csv_rows(store, "products.csv")]
+    write_csv(store, "products.csv", rows)
+    with pytest.raises(ingest.IngestError, match="stock_quantity"):
+        ingest.startup()
+
+
 # ---------- conexões ----------
+
+
+def test_connect_ro_does_not_reingest_after_startup(store):
+    """Colar um CSV novo só vale na próxima inicialização: consultar o banco nunca dispara ingest."""
+    ingest.startup()
+    rows = csv_rows(store, "products.csv")
+    for r in rows:
+        if r["product_id"] == "95":
+            r["price_brl"] = "1999.9"
+    write_csv(store, "products.csv", rows)
+    bump_mtime(store, "products.csv")
+    conn = db.connect_ro()
+    try:
+        assert conn.execute("SELECT price_brl FROM products WHERE product_id = 95").fetchone() == (2199.0,)
+    finally:
+        conn.close()
 
 
 def test_readonly_connection_rejects_writes(store):
