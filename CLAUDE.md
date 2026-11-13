@@ -1,1 +1,1 @@
-Each commit must include an update to CHANGELOG.md
+Each commit must include an update to CHANGELOG.md, in the same commit as the change. Keep entries in chronological order: append the new entry at the end of the numbered list, prefixed with its type (Added, Changed, Fixed, Removed, Docs, Test, Chore).
