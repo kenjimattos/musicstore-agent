@@ -149,3 +149,10 @@ def test_file_is_not_reread_while_the_mtime_is_the_same(store):
     path.write_text("outro texto", encoding="utf-8")
     os.utime(path, ns=(mtime, mtime))
     assert policies.load_policies() == original
+
+
+def test_installment_rule_for_small_purchases_is_unambiguous(md):
+    # o PDF diz "sem valor mínimo de parcela (exceto abaixo de R$ 50,00)", que o modelo pode ler
+    # como piso por parcela. A regra é: compra abaixo de R$ 50,00 não parcela.
+    assert "exceto abaixo" not in md
+    assert re.search(r"abaixo de R\$ 50,00 não (podem|pode) ser parcelad", md)

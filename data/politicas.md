@@ -36,7 +36,7 @@ Aceitamos as seguintes formas de pagamento, em compras presenciais e online:
 
 ### 3.1 Regras de parcelamento
 
-- Em até 3x: sem juros e sem valor mínimo de parcela (exceto abaixo de R$ 50,00).
+- Em até 3x: sem juros e sem valor mínimo de parcela. Compras abaixo de R$ 50,00 não podem ser parceladas.
 - De 4x a 6x: sem juros, com parcela mínima de R$ 80,00.
 - De 7x a 12x: sem juros, com parcela mínima de R$ 100,00.
 - Combinação de formas de pagamento (por exemplo, PIX + cartão): permitida em compras acima de R$ 2.000,00.

@@ -263,6 +263,17 @@ SCENARIOS: tuple[Scenario, ...] = (
             ),
         ),
     ),
+    Scenario(
+        id="policy_small_purchase_installments",
+        title="Compra abaixo de R$ 50 não parcela (regra 3.1, sem tools)",
+        phone=VISITOR,
+        turns=(
+            Turn(
+                "dá pra parcelar em 3x uma compra de R$ 40?",
+                Expect(tools=(), mention_any=("nao", "à vista", "a vista"), not_mention=("3x de",)),
+            ),
+        ),
+    ),
     # ---------- Pedidos com fixture (EXTRA_ORDERS) ----------
     Scenario(
         id="return_asks_which_order",
