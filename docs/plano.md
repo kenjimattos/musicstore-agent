@@ -236,7 +236,7 @@ O manual (seção 9) diz que o cliente pode pedir a exclusão dos seus dados pel
   - **não promete prazo nem confirma que os dados foram apagados**, porque o manual não traz prazo e porque nada foi apagado;
   - **não promete apagar tudo:** a seção 9 lista o cumprimento de obrigações legais e fiscais entre os usos dos dados, então alguns registros (como pedidos) podem precisar ser mantidos. O agente fala em "tratar o pedido", não em "apagar tudo";
   - **não confirma por qual canal responderá**, só que a equipe entrará em contato.
-- **Output guard:** o número de protocolo passa a ser mais um código que só pode aparecer se vier do resultado da tool do turno.
+- **Output guard:** o número de protocolo passa a ser mais um código que só pode aparecer se vier do resultado da tool do turno **ou se for um protocolo do próprio cliente no banco** (`tools.customer_protocols`). Protocolo é identificador durável, não dado que muda como preço; sem essa exceção, o agente não consegue repetir no turno seguinte o protocolo que ele mesmo deu.
 - **Auditoria:** o pedido aparece no `audit_log` como qualquer tool chamada, e `data_requests` guarda o histórico.
 - **Painel do avaliador:** mostra as solicitações de exclusão do cliente selecionado (protocolo, data, status) e deixa explícito que **os dados continuam no banco**, por ser uma simulação.
 - **Em produção (README, limitações):** a exclusão real passaria por uma fila tratada pela equipe, com verificação de identidade, e cobriria mais que `customers`:
@@ -253,7 +253,8 @@ O agente diz "vou encaminhar à equipe" em vários fluxos: atraso, reclamação,
   - **`order_id` validado:** se o cliente é identificado, o pedido precisa ser dele; se for de outro, a tool rejeita. O visitante abre chamado sem pedido vinculado, e o número do pedido pode ir no resumo, para a equipe verificar.
   - Grava em `support_tickets` (`ticket_id`, `customer_id` ou `phone`, `order_id`, `reason`, `summary`, `thread_id`, `created_at`, `status = 'open'`) com a mesma função de escrita restrita a `INSERT`.
   - Devolve um **protocolo** (`ATD-000034`) e o prazo de retorno **das políticas**: "até 24 horas úteis" (seção 7.3). Como o prazo vem no resultado da tool, o output_guard aceita que ele apareça na resposta.
-  - **Idempotente:** se já existe um chamado aberto com o mesmo cliente (ou telefone), o mesmo `order_id` e o mesmo `reason`, devolve o protocolo existente. Reclamar duas vezes do mesmo atraso não abre dois chamados.
+  - **Idempotente:** se já existe um chamado aberto com o mesmo cliente (ou telefone) e o mesmo `order_id`, devolve o protocolo existente, **qualquer que seja o `reason`**. Reclamar do mesmo atraso não abre um 2º chamado, nem com outro motivo: a equipe já cuida daquele pedido, e um 2º protocolo só confunde o cliente. (A 1ª versão incluía o `reason` na chave; no e2e, "já reclamei disso" abriu um `reclamacao` ao lado do `atraso` do mesmo pedido.)
+  - **`safe_fallback` reaproveita o chamado aberto da conversa** (`thread_id`), em vez de abrir outro.
 - **Quando o agente chama a tool, sem pedir confirmação:**
   - pedido atrasado (`is_late = true`) e o cliente pergunta onde ele está, quando chega, ou reclama. **Se ele só pede uma informação que o agente resolve (ex.: o código de rastreio), o agente responde, diz em uma frase que o pedido está atrasado e oferece abrir o chamado, sem abrir:** a missão do agente é desafogar a equipe, então chamado só para o que ele não resolve;
   - reclamação;

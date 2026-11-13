@@ -272,7 +272,11 @@ def insert_data_request(customer_id: int, thread_id: str | None, requested_at: s
 
 def insert_ticket(*, customer_id: int | None, phone: str | None, order_id: int | None, reason: str,
                   summary: str, thread_id: str | None, created_at: str) -> tuple[int, bool]:
-    """Abre o chamado. Devolve (ticket_id, já_existia): idempotente por (cliente ou telefone, pedido, motivo)."""
+    """Abre o chamado. Devolve (ticket_id, já_existia): idempotente por (cliente ou telefone, pedido).
+
+    O motivo fica fora da chave: uma reclamação sobre um pedido que já tem chamado aberto é o mesmo caso
+    para a equipe, e um 2º protocolo só confunde o cliente.
+    """
     params = {"customer_id": customer_id, "phone": phone, "order_id": order_id, "reason": reason,
               "summary": summary, "thread_id": thread_id, "created_at": created_at}
     conn = connect_rw()
@@ -281,7 +285,7 @@ def insert_ticket(*, customer_id: int | None, phone: str | None, order_id: int |
         create_request_tables(conn)
         row = conn.execute(
             "SELECT ticket_id FROM support_tickets WHERE status = 'open' AND customer_id IS :customer_id "
-            "AND phone IS :phone AND order_id IS :order_id AND reason = :reason ORDER BY ticket_id LIMIT 1",
+            "AND phone IS :phone AND order_id IS :order_id ORDER BY ticket_id LIMIT 1",
             params,
         ).fetchone()
         if row:
@@ -296,6 +300,28 @@ def insert_ticket(*, customer_id: int | None, phone: str | None, order_id: int |
         return cursor.lastrowid, False
     finally:
         conn.close()
+
+
+def customer_request_ids(conn, customer_id: int | None, phone: str | None) -> tuple[list[int], list[int]]:
+    """(ticket_ids, request_ids) do próprio cliente; o visitante só tem chamados, pelo telefone."""
+    if customer_id is not None:
+        tickets = conn.execute("SELECT ticket_id FROM support_tickets WHERE customer_id = ? ORDER BY 1",
+                               (customer_id,)).fetchall()
+        requests = conn.execute("SELECT request_id FROM data_requests WHERE customer_id = ? ORDER BY 1",
+                                (customer_id,)).fetchall()
+    elif phone is not None:
+        tickets = conn.execute("SELECT ticket_id FROM support_tickets WHERE customer_id IS NULL AND phone = ? "
+                               "ORDER BY 1", (phone,)).fetchall()
+        requests = []
+    else:
+        return [], []
+    return [r[0] for r in tickets], [r[0] for r in requests]
+
+
+def open_ticket_in_thread(conn, thread_id: str) -> int | None:
+    row = conn.execute("SELECT ticket_id FROM support_tickets WHERE status = 'open' AND thread_id = ? "
+                       "ORDER BY ticket_id LIMIT 1", (thread_id,)).fetchone()
+    return row[0] if row else None
 
 
 # ---------- histórico da conversa ----------

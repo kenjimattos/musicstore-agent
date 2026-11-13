@@ -9,6 +9,7 @@ O input_guard (classificador Haiku) roda antes do agente: mensagem barrada receb
 import json
 import os
 import threading
+from contextlib import closing
 from dataclasses import dataclass, field
 
 import anthropic
@@ -178,9 +179,17 @@ def _ensure_database() -> None:
 
 
 def safe_fallback(summary: str, *, customer_id, phone, thread_id) -> str:
-    """Resposta segura quando o output_guard reprova duas vezes: o código abre o chamado, não o modelo."""
-    ticket = tools.escalate_to_team("outro", summary[:tools.MAX_SUMMARY_CHARS] or "Pergunta sem resposta verificada",
-                                    customer_id=customer_id, phone=phone, thread_id=thread_id)
+    """Resposta segura quando o output_guard reprova duas vezes: o código abre o chamado, não o modelo.
+
+    Se a conversa já tem chamado aberto, reaproveita o protocolo dele (um caso, um protocolo).
+    """
+    with closing(db.connect_ro()) as conn:
+        open_id = db.open_ticket_in_thread(conn, thread_id)
+    if open_id is not None:
+        ticket = {"protocol": tools.ticket_protocol(open_id), "return_deadline": tools.RETURN_DEADLINE}
+    else:
+        ticket = tools.escalate_to_team("outro", summary[:tools.MAX_SUMMARY_CHARS] or "Pergunta sem resposta verificada",
+                                        customer_id=customer_id, phone=phone, thread_id=thread_id)
     protocol = ticket.get("protocol")
     deadline = ticket.get("return_deadline", tools.RETURN_DEADLINE)
     note = f" (protocolo {protocol})" if protocol else ""
@@ -216,7 +225,8 @@ def respond(phone: str, text: str, thread_id: str) -> Reply:
         turn_results += [c.result for c in trace.tool_calls[before:]]
         if answer is None:  # limite de iterações: nunca uma resposta pela metade
             break
-        verdict = guards.output_guard(answer, turn_results, policies.load_policies())
+        verdict = guards.output_guard(answer, turn_results, policies.load_policies(),
+                                      protocols=tools.customer_protocols(customer_id=customer_id, phone=phone))
         if verdict.ok:
             trace.output_verdict = "approved"
             return Reply(answer, trace)

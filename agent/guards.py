@@ -10,7 +10,8 @@ do agente (prompt, tools somente leitura, identidade em código) continuam valen
 Saída: `output_guard`, determinístico e sem LLM.
 
 Princípio: todo fato verificável da resposta precisa ter fonte. Fontes válidas: resultados de tools
-do turno atual e o texto das políticas. O que não tem fonte volta ao agente como feedback (1 retry).
+do turno atual e o texto das políticas; para protocolos (ATD-/LGPD-), também os do próprio cliente no
+banco, porque são identificadores duráveis. O que não tem fonte volta ao agente como feedback (1 retry).
 
 Verifica: valores em R$, nomes de produto do catálogo, códigos (rastreio, ATD-/LGPD-), números de
 pedido, telefones, e-mails, datas dd/mm, prazos em dias/horas, quantidades de estoque e percentuais.
@@ -172,8 +173,11 @@ def _number(value) -> float:
     return float(value.replace(",", "."))
 
 
-def output_guard(text: str, tool_results: list, policies: str) -> Verdict:
-    """Confere os fatos de `text` contra `tool_results` (só do turno atual) e `policies`."""
+def output_guard(text: str, tool_results: list, policies: str, protocols=()) -> Verdict:
+    """Confere os fatos de `text` contra `tool_results` (só do turno atual) e `policies`.
+
+    `protocols`: protocolos do próprio cliente (`tools.customer_protocols`), válidos em qualquer turno.
+    """
     blob = json.dumps(tool_results, ensure_ascii=False, default=str)
     source = f"{blob}\n{policies}"
     pairs = list(_walk(tool_results))
@@ -204,9 +208,10 @@ def output_guard(text: str, tool_results: list, policies: str) -> Verdict:
                                      "consulte a tool ou não o cite")
 
     # códigos e números de pedido
+    own = {p.upper() for p in protocols}
     for pattern, label in ((_TRACKING, "código de rastreio"), (_PROTOCOL, "protocolo")):
         for code in pattern.findall(text):
-            if code.upper() not in source.upper():
+            if code.upper() not in source.upper() and code.upper() not in own:
                 flag(f"code:{code.upper()}", f"o {label} {code} não veio de nenhuma consulta; remova")
     orders = {str(v) for k, v in pairs if k == "order_id"}
     for a, b in _ORDER.findall(text):

@@ -337,7 +337,25 @@ def request_data_deletion(*, customer_id=None, thread_id=None) -> dict:
                         "também é possível pedir por e-mail à loja. Nada foi registrado.",
         }
     request_id, existed = db.insert_data_request(customer_id, thread_id, today().isoformat(timespec="seconds"))
-    return {"registered": True, "protocol": f"LGPD-{request_id:06d}", "status": "pending", "already_requested": existed}
+    return {"registered": True, "protocol": deletion_protocol(request_id), "status": "pending",
+            "already_requested": existed}
+
+
+def ticket_protocol(ticket_id: int) -> str:
+    return f"ATD-{ticket_id:06d}"
+
+
+def deletion_protocol(request_id: int) -> str:
+    return f"LGPD-{request_id:06d}"
+
+
+def customer_protocols(*, customer_id=None, phone=None) -> list[str]:
+    """Protocolos do próprio cliente (chamados e pedidos de exclusão). Não é tool do modelo: é fonte do
+    output_guard, porque um protocolo dado num turno anterior continua válido (é um identificador, não um
+    dado que muda como preço ou estoque)."""
+    with closing(db.connect_ro()) as conn:
+        tickets, requests = db.customer_request_ids(conn, customer_id, phone)
+    return [ticket_protocol(t) for t in tickets] + [deletion_protocol(r) for r in requests]
 
 
 def escalate_to_team(reason, summary, order_id=None, *, customer_id=None, phone=None, thread_id=None) -> dict:
@@ -363,7 +381,7 @@ def escalate_to_team(reason, summary, order_id=None, *, customer_id=None, phone=
         customer_id=customer_id, phone=stored_phone, order_id=order_id, reason=reason, summary=summary.strip(),
         thread_id=thread_id, created_at=today().isoformat(timespec="seconds"),
     )
-    return {"protocol": f"ATD-{ticket_id:06d}", "status": "open", "return_deadline": RETURN_DEADLINE,
+    return {"protocol": ticket_protocol(ticket_id), "status": "open", "return_deadline": RETURN_DEADLINE,
             "already_open": existed}
 
 
