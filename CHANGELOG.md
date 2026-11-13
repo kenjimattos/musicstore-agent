@@ -48,3 +48,4 @@ sequence of decisions and corrections stays readable.
 34. **Docs:** plan records that the conversation does not expire (history limited to 10 turns, no idle cutoff) as a product choice, with its limitation.
 35. **Docs:** plan adds an e2e measurement for a returning customer on a stale thread (ambiguous "sim", saudação), to decide whether idle expiry is needed.
 36. **Added:** agent: tool-use loop with the `anthropic` SDK, persona prompt with cached policies, output guard with one retry and `safe_fallback` ticket, history window (`build_history`), `messages` table and a debug CLI. The input guard is plugged in later.
+37. **Test:** input guard classifier (manipulation, out of scope, store subjects that must pass, context follow-ups, tone, length limit); needs the API, red until the implementation lands.
