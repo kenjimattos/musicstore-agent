@@ -11,6 +11,11 @@ Interface esperada (commit 10c). Toda tool devolve um dict; erro vira `{"error":
         "protocol": "ATD-000001", "status": "open", "return_deadline": "até 24 horas úteis",
         "already_open": bool,
     }   # reason: atraso | reclamacao | valor_contestado | outro; summary: texto de até 300 caracteres
+        # idempotente por (cliente ou telefone, pedido): com chamado aberto para o pedido, devolve o mesmo
+        # protocolo, qualquer que seja o motivo
+
+    tools.customer_protocols(*, customer_id=None, phone=None) -> ["ATD-000001", "LGPD-000001", ...]
+        # protocolos do próprio cliente (chamados e pedidos de exclusão); fonte do output_guard
 
     tools.dispatch(name, args, *, customer_id=None, phone=None, thread_id=None) -> dict
     tools.TOOL_SCHEMAS -> [{"name", "description", "input_schema"}, ...]
@@ -161,11 +166,42 @@ def test_same_complaint_returns_the_same_protocol(ready):
     assert len(query("SELECT * FROM support_tickets")) == 1
 
 
-def test_another_reason_opens_another_ticket(ready):
+def test_another_reason_for_the_same_order_reuses_the_open_ticket(ready):
+    # "já reclamei disso" sobre o pedido atrasado não abre um 2º chamado: a equipe já cuida do pedido
     first = escalate()
-    other = escalate(reason="reclamacao")
+    other = escalate(reason="reclamacao", summary="A cliente reclamou do atraso.")
+    assert other["protocol"] == first["protocol"]
+    assert other["already_open"] is True
+    assert len(query("SELECT * FROM support_tickets")) == 1
+
+
+def test_another_order_opens_another_ticket(ready):
+    first = escalate()
+    other = escalate(order_id=None, reason="outro", summary="Dúvida sobre garantia.")
     assert other["protocol"] != first["protocol"]
     assert len(query("SELECT * FROM support_tickets")) == 2
+
+
+# ---------- protocolos do cliente (fonte do output_guard em turnos seguintes) ----------
+
+
+def test_customer_protocols_lists_tickets_and_deletion_requests(ready):
+    ticket = escalate()
+    request = tools.request_data_deletion(customer_id=ANA, thread_id="t1")
+    assert set(tools.customer_protocols(customer_id=ANA)) == {ticket["protocol"], request["protocol"]}
+
+
+def test_customer_protocols_never_lists_someone_elses(ready):
+    escalate()  # chamado da Ana
+    tools.escalate_to_team("outro", "Quer falar com uma pessoa.", None, customer_id=None,
+                           phone=VISITOR_PHONE, thread_id="t9")
+    assert tools.customer_protocols(customer_id=DIEGO_13) == []
+    visitor = tools.customer_protocols(customer_id=None, phone=VISITOR_PHONE)
+    assert len(visitor) == 1 and visitor != tools.customer_protocols(customer_id=ANA)
+
+
+def test_customer_protocols_of_unknown_visitor_is_empty(ready):
+    assert tools.customer_protocols(customer_id=None, phone=None) == []
 
 
 def test_customer_cannot_escalate_someone_elses_order(ready):

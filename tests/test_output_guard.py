@@ -186,6 +186,17 @@ def test_protocol_without_tool_call_fails(pol):
     assert_blocked(check("Seu protocolo é ATD-000001.", [], pol), "ATD-000001")
 
 
+# protocolos são identificadores duráveis: o de um turno anterior vale se for do próprio cliente
+def test_customers_protocol_from_an_earlier_turn_passes(pol):
+    verdict = guards.output_guard("Seu chamado ATD-000001 continua aberto.", [], pol, protocols=["ATD-000001"])
+    assert verdict.ok
+
+
+def test_protocol_not_among_the_customers_fails(pol):
+    verdict = guards.output_guard("Seu chamado é o ATD-000002.", [], pol, protocols=["ATD-000001"])
+    assert_blocked(verdict, "ATD-000002")
+
+
 # ---------- contatos ----------
 
 
