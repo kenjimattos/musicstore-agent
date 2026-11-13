@@ -6,13 +6,15 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic",
-    "pypdf",
     "streamlit",
     "python-dotenv",
 ]
 
 [dependency-groups]
-dev = ["pytest"]
+dev = [
+    "pypdf>=7.1.0",
+    "pytest",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
