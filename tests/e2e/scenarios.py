@@ -274,6 +274,94 @@ SCENARIOS: tuple[Scenario, ...] = (
             ),
         ),
     ),
+    # ---------- Regras de prompt: o que o agente não pode afirmar sem fonte (ver plano, "Revisão de ambiguidades") ----------
+    Scenario(
+        id="policy_freight_other_city_no_value",
+        title="Frete para outra cidade: sem valor, é calculado pelo CEP",
+        phone=VISITOR,
+        turns=(
+            Turn(
+                "quanto custa o frete pra Dourados?",
+                # max_price=0: nenhum valor em R$ (o manual só dá taxa para Campo Grande)
+                Expect(tools=(), mention_any=("cep",), max_price=0.0),
+            ),
+        ),
+    ),
+    Scenario(
+        id="policy_special_freight_specific_product",
+        title="Frete especial: não afirma para um produto específico",
+        phone=VISITOR,
+        turns=(
+            Turn(
+                "a Bateria Acústica Pearl Kit 2 Studio paga frete especial?",
+                Expect(mention_any=("cotacao", "equipe", "podem exigir", "pode exigir"), max_price=0.0),
+            ),
+        ),
+    ),
+    Scenario(
+        id="policy_manufacturer_warranty_no_brand_terms",
+        title="Garantia do fabricante: sem prazo de marca, remete ao certificado",
+        phone=VISITOR,
+        turns=(Turn("quanto tempo é a garantia da Yamaha?", Expect(mention_any=("certificado",))),),
+    ),
+    Scenario(
+        id="policy_refund_deadline",
+        title="Reembolso: 10 dias úteis a partir da confirmação da loja",
+        phone=VISITOR,
+        turns=(
+            Turn(
+                "em quanto tempo eu recebo o reembolso de uma devolução?",
+                Expect(tools=(), mention_all=("10 dias uteis",), mention_any=("confirma", "solicitacao"), not_mention=("10 dias corridos",)),
+            ),
+        ),
+    ),
+    Scenario(
+        id="policy_defect_after_30_days",
+        title="Defeito depois dos 30 dias: informa os 90 dias e encaminha à equipe",
+        phone=VISITOR,
+        turns=(
+            Turn(
+                "comprei um violão há 2 meses e apareceu um defeito de fabricação, quem resolve?",
+                Expect(tools_include=("escalate_to_team",), mention_all=("90 dias",)),
+            ),
+        ),
+    ),
+    Scenario(
+        id="policy_promotion_exchange",
+        title="Comprou em promoção: não nega troca pelo nome da promoção",
+        phone=VISITOR,
+        turns=(
+            Turn(
+                "comprei na liquidação, posso trocar?",
+                Expect(
+                    mention_any=("defeito", "arrependimento", "preferencia"),
+                    not_mention=("promocao nao troca", "em promocao nao", "nao aceitamos troca", "nao trocamos"),
+                ),
+            ),
+        ),
+    ),
+    Scenario(
+        id="policy_open_now",
+        title="Aberto agora?: fala da loja física, sem afirmar feriado",
+        phone=VISITOR,
+        turns=(
+            Turn(
+                "vocês estão abertos agora?",
+                Expect(tools=(), mention_any=("segunda", "sabado", "horario"), not_mention=("hoje e feriado", "hoje nao e feriado")),
+            ),
+        ),
+    ),
+    Scenario(
+        id="policy_no_section_numbers",
+        title="Troca por defeito: explica sem citar número de seção",
+        phone=VISITOR,
+        turns=(
+            Turn(
+                "qual é a regra de troca por defeito?",
+                Expect(tools=(), mention_any=("30 dias",), not_mention=("secao", "item 4", "4.2")),
+            ),
+        ),
+    ),
     # ---------- Pedidos com fixture (EXTRA_ORDERS) ----------
     Scenario(
         id="return_asks_which_order",
