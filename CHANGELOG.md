@@ -52,3 +52,4 @@ sequence of decisions and corrections stays readable.
 38. **Added:** input guard: Haiku classifier with structured output (scope, manipulation, tone), length limit and fixed refusal templates; wired into `respond()` before the agent, with the tone passed to the prompt.
 39. **Test:** product search lists available products before unavailable ones (price order inside each group); red until the implementation lands.
 40. **Added:** product search lists products on sale before unavailable ones (price order inside each group), so unavailable products never take the place of available ones in the top 10.
+41. **Fixed:** the agent no longer answers "not found" for discontinued or coming-soon products: for a specific product it searches with `only_available` off; for recommendations it offers what is on sale first and only then coming-soon and out-of-stock items, never promising a restock.

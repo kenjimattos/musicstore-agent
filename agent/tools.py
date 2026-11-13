@@ -393,7 +393,9 @@ TOOL_SCHEMAS = [
             },
             "min_price": {"type": "number", "description": "Preço mínimo em R$."},
             "max_price": {"type": "number", "description": "Preço máximo em R$."},
-            "only_available": {"type": "boolean", "description": "Só produtos à venda com estoque (padrão: verdadeiro)."},
+            "only_available": {"type": "boolean", "description": "Só produtos à venda com estoque (padrão: verdadeiro). "
+                                                                   "Use false quando o cliente perguntar por um produto específico, "
+                                                                   "para ver também os descontinuados, em breve e sem estoque (veja availability)."},
         },
     ),
     _schema(
