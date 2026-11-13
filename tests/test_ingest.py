@@ -10,6 +10,7 @@ Interface esperada (commit 4):
     ingest.IngestError       # ValueError com mensagem clara (arquivo, coluna ou linha)
     db.connect_rw()          # conexão de escrita (ingest, histórico, auditoria)
     db.connect_ro()          # conexão somente leitura, a única que as tools usam; nunca reingere
+    tabela product_specs     # (product_id, key, value), explodida de products.specs (commit 4c)
 """
 
 import csv
@@ -146,6 +147,87 @@ def test_search_text_is_lowercase_and_accent_free(store):
     assert "violao classico" in text  # descrição: "Violão clássico..."
     assert "yamaha c40" in text  # nome
     assert text == text.lower() and text.isascii()
+
+
+# ---------- product_specs: o JSON de specs explodido em chave/valor, para filtrar ----------
+# Interface esperada (commit 4c): tabela product_specs (product_id, key, value), índice em (key, value),
+# gravada na mesma transação das demais. products.specs continua sendo o JSON original.
+
+
+def specs_of(store, product_id):
+    return dict(query(store, "SELECT key, value FROM product_specs WHERE product_id = ?", product_id))
+
+
+def test_product_specs_has_one_row_per_key_value_pair(store):
+    ingest.ingest_all()
+    assert specs_of(store, 111) == {
+        "top": "spruce solido",
+        "back_sides": "jacaranda",
+        "neck": "cedro",
+        "strings": "nylon",
+        "scale": "650mm",
+        "electronics": "yes",
+        "color": "natural",
+    }
+    assert specs_of(store, 82)["electronics"] == "no"
+
+
+def test_product_specs_values_are_lowercase_and_accent_free(store):
+    ingest.ingest_all()
+    values = [v for (v,) in query(store, "SELECT value FROM product_specs")]
+    assert values and all(v == v.lower() and v.isascii() for v in values)
+
+
+def test_product_specs_keeps_the_original_json_in_products(store):
+    ingest.ingest_all()
+    (specs,) = query(store, "SELECT specs FROM products WHERE product_id = 111")[0]
+    assert '"Spruce Sólido"' in specs  # fonte intacta, só a tabela de filtro é normalizada
+
+
+def test_product_specs_can_be_filtered_by_key_and_value(store):
+    ingest.ingest_all()
+    ids = {i for (i,) in query(store, "SELECT product_id FROM product_specs WHERE key = 'strings' AND value = 'nylon'")}
+    assert {81, 82, 111} <= ids
+
+
+def test_product_specs_has_an_index_on_key_and_value(store):
+    ingest.ingest_all()
+    (sql,) = query(store, "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'product_specs'")[0]
+    assert "key" in sql and "value" in sql
+
+
+def test_invalid_specs_json_raises_a_clear_error(store):
+    rows = csv_rows(store, "products.csv")
+    for r in rows:
+        if r["product_id"] == "82":
+            r["specs"] = '{"strings": "nylon"'  # chave fechada faltando
+    write_csv(store, "products.csv", rows)
+    with pytest.raises(ingest.IngestError, match=r"products\.csv.*specs.*82"):
+        ingest.ingest_all()
+
+
+def test_reingest_rebuilds_product_specs(store):
+    ingest.ensure_fresh()
+    rows = csv_rows(store, "products.csv")
+    for r in rows:
+        if r["product_id"] == "82":
+            r["specs"] = '{"strings": "steel"}'
+    write_csv(store, "products.csv", rows)
+    bump_mtime(store, "products.csv")
+    assert ingest.ensure_fresh() is True
+    assert specs_of(store, 82) == {"strings": "steel"}
+
+
+def test_failed_reingest_keeps_the_previous_product_specs(store):
+    ingest.ensure_fresh()
+    before = query(store, "SELECT product_id, key, value FROM product_specs ORDER BY 1, 2")
+    rows = csv_rows(store, "products.csv")
+    rows[0]["specs"] = "não é json"
+    write_csv(store, "products.csv", rows)
+    bump_mtime(store, "products.csv")
+    with pytest.raises(ingest.IngestError, match="specs"):
+        ingest.ensure_fresh()
+    assert query(store, "SELECT product_id, key, value FROM product_specs ORDER BY 1, 2") == before
 
 
 # ---------- re-ingestão por mtime: "colar o CSV novo e pronto" ----------
