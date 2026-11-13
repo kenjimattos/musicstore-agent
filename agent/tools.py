@@ -1,11 +1,14 @@
-"""Tools de consulta de produtos. Somente leitura, sem LLM.
+"""Tools do agente: consulta de produtos e pedidos (somente leitura) e duas escritas simuladas, sem LLM.
 
 Duas regras de desenho:
 - o modelo não faz conta: promoção, PIX e parcelas já saem calculados daqui, e é isso que o
   output_guard confere depois;
 - o modelo não escreve SQL: ele escolhe a tool e os argumentos, que são validados em Python
   antes de chegar ao repositório (`db.py`). Argumento inválido vira `{"error": ...}`, com a
-  lista de opções válidas, para o modelo se corrigir na iteração seguinte.
+  lista de opções válidas, para o modelo se corrigir na iteração seguinte;
+- a identidade (cliente, telefone, conversa) vem do canal e é injetada por `dispatch`; não existe nos
+  schemas e é recusada nos argumentos do modelo. As únicas escritas são o registro de um pedido de
+  exclusão de dados e de um chamado para a equipe, ambos simulações (`INSERT` em tabelas próprias).
 """
 
 import json
@@ -30,6 +33,9 @@ MAX_ORDER_SUMMARIES = 5
 # Outras cidades: o maior prazo entre PAC, SEDEX e Jadlog, porque a base não registra a modalidade.
 POLICY_DELIVERY_DAYS = {"metropolitana": 3, "outras_cidades": 12}
 NOT_FOUND = "Pedido não encontrado."
+ESCALATION_REASONS = ("atraso", "reclamacao", "valor_contestado", "outro")
+MAX_SUMMARY_CHARS = 300
+RETURN_DEADLINE = "até 24 horas úteis"  # prazo de retorno do atendimento (seção 7.3 do manual)
 
 # Regra 3.1 do manual: compra abaixo de R$ 50 não parcela; até 3x não há parcela mínima;
 # de 4x a 6x, R$ 80; de 7x a 12x, R$ 100.
@@ -317,3 +323,140 @@ def get_my_orders(order_id=None, email_or_phone=None, *, customer_id=None) -> di
             "order": _order_detail(conn, ranked[0], now) if ranked else None,
             "other_orders": [_order_summary(conn, o) for o in ranked[1:]],
         }
+
+
+# ---------- escritas simuladas: exclusão de dados e encaminhamento ----------
+
+
+def request_data_deletion(*, customer_id=None, thread_id=None) -> dict:
+    """SIMULAÇÃO: só registra o pedido (nenhum dado é apagado). Só para cliente identificado pelo canal."""
+    if customer_id is None:
+        return {
+            "registered": False,
+            "guidance": "O pedido de exclusão só pode ser registrado pelo número de WhatsApp cadastrado na loja; "
+                        "também é possível pedir por e-mail à loja. Nada foi registrado.",
+        }
+    request_id, existed = db.insert_data_request(customer_id, thread_id, today().isoformat(timespec="seconds"))
+    return {"registered": True, "protocol": f"LGPD-{request_id:06d}", "status": "pending", "already_requested": existed}
+
+
+def escalate_to_team(reason, summary, order_id=None, *, customer_id=None, phone=None, thread_id=None) -> dict:
+    """SIMULAÇÃO: registra um chamado para a equipe (ninguém é notificado)."""
+    if not isinstance(reason, str) or reason not in ESCALATION_REASONS:
+        return {"error": f"reason inválido. Valores válidos: {', '.join(ESCALATION_REASONS)}."}
+    if not isinstance(summary, str) or not summary.strip():
+        return {"error": "summary precisa ser um texto curto com o resumo do caso."}
+    if len(summary.strip()) > MAX_SUMMARY_CHARS:
+        return {"error": f"summary precisa ter no máximo {MAX_SUMMARY_CHARS} caracteres."}
+    if order_id is not None and (isinstance(order_id, bool) or not isinstance(order_id, int) or order_id < 1):
+        return {"error": "order_id precisa ser um número inteiro positivo."}
+    if customer_id is None:
+        order_id = None  # visitante: sem pedido vinculado (o número pode ir no resumo)
+        stored_phone = phone
+    else:
+        stored_phone = None
+        if order_id is not None:
+            with closing(db.connect_ro()) as conn:
+                if db.get_order(conn, order_id, customer_id) is None:
+                    return {"error": NOT_FOUND}
+    ticket_id, existed = db.insert_ticket(
+        customer_id=customer_id, phone=stored_phone, order_id=order_id, reason=reason, summary=summary.strip(),
+        thread_id=thread_id, created_at=today().isoformat(timespec="seconds"),
+    )
+    return {"protocol": f"ATD-{ticket_id:06d}", "status": "open", "return_deadline": RETURN_DEADLINE,
+            "already_open": existed}
+
+
+# ---------- schemas e dispatch ----------
+
+
+def _schema(name: str, description: str, properties: dict | None = None, required: list | None = None) -> dict:
+    return {"name": name, "description": description,
+            "input_schema": {"type": "object", "properties": properties or {}, "required": required or []}}
+
+
+# A identidade (customer_id, phone, thread_id) nunca aparece aqui: vem do canal, via `dispatch`.
+TOOL_SCHEMAS = [
+    _schema(
+        "search_products",
+        "Busca produtos no catálogo da loja. Devolve preço, estoque, promoção, preço no PIX e parcelamento já "
+        "calculados: use esses valores, sem fazer conta.",
+        {
+            "query": {"type": "string", "description": "Texto livre: nome, marca ou descrição (sem acento ou caixa)."},
+            "category": {"type": "string", "description": "Nome da categoria, como em list_categories."},
+            "specs": {
+                "type": "object",
+                "description": 'Filtro por característica, {chave: valor}; todos precisam casar. '
+                               'Ex.: {"strings": "nylon"} ou {"electronics": "yes"}. Chave ou valor desconhecido '
+                               "devolve erro com as opções válidas.",
+                "additionalProperties": {"type": "string"},
+            },
+            "min_price": {"type": "number", "description": "Preço mínimo em R$."},
+            "max_price": {"type": "number", "description": "Preço máximo em R$."},
+            "only_available": {"type": "boolean", "description": "Só produtos à venda com estoque (padrão: verdadeiro)."},
+        },
+    ),
+    _schema(
+        "get_product_details",
+        "Detalhes de um produto (especificações e descrição). Se estiver sem estoque ou descontinuado, "
+        "inclui alternativas da mesma categoria.",
+        {"product_id": {"type": "integer", "description": "Número do produto, como devolvido por search_products."}},
+        ["product_id"],
+    ),
+    _schema("list_categories", "Lista as categorias da loja com a quantidade de produtos ativos (inclui as vazias)."),
+    _schema(
+        "get_my_orders",
+        "Consulta pedidos. Cliente identificado: sem argumentos devolve o pedido mais relevante em detalhe e os "
+        "demais resumidos; com order_id, aquele pedido. Visitante: order_id e email_or_phone do cadastro são "
+        "obrigatórios. Prazos e atrasos já vêm calculados.",
+        {
+            "order_id": {"type": "integer", "description": "Número do pedido."},
+            "email_or_phone": {"type": "string", "description": "Só para visitante: e-mail ou telefone do cadastro."},
+        },
+    ),
+    _schema(
+        "request_data_deletion",
+        "Registra um pedido de exclusão dos dados do cliente (simulação: nada é apagado). Chame só depois de o "
+        "cliente confirmar explicitamente. Devolve o protocolo.",
+    ),
+    _schema(
+        "escalate_to_team",
+        "Encaminha o atendimento para a equipe (abre um chamado e devolve o protocolo e o prazo de retorno). "
+        "Use em atraso de pedido, reclamação, valor contestado ou pedido para falar com uma pessoa.",
+        {
+            "reason": {"type": "string", "enum": list(ESCALATION_REASONS), "description": "Motivo do chamado."},
+            "summary": {"type": "string", "description": f"Resumo curto do caso, até {MAX_SUMMARY_CHARS} caracteres."},
+            "order_id": {"type": "integer", "description": "Número do pedido, se houver."},
+        },
+        ["reason", "summary"],
+    ),
+]
+
+_SCHEMAS = {s["name"]: s for s in TOOL_SCHEMAS}
+# nome -> (função, identidade que o código injeta)
+_TOOLS = {
+    "search_products": (search_products, ()),
+    "get_product_details": (get_product_details, ()),
+    "list_categories": (list_categories, ()),
+    "get_my_orders": (get_my_orders, ("customer_id",)),
+    "request_data_deletion": (request_data_deletion, ("customer_id", "thread_id")),
+    "escalate_to_team": (escalate_to_team, ("customer_id", "phone", "thread_id")),
+}
+
+
+def dispatch(name: str, args, *, customer_id=None, phone=None, thread_id=None) -> dict:
+    """Executa a tool pedida pelo modelo. A identidade vem do canal; nos argumentos do modelo ela é recusada."""
+    if name not in _TOOLS:
+        return {"error": f"Tool desconhecida: {name}."}
+    if not isinstance(args, dict):
+        return {"error": "Os argumentos precisam ser um objeto JSON."}
+    schema = _SCHEMAS[name]["input_schema"]
+    unknown = sorted(set(args) - set(schema["properties"]))
+    if unknown:
+        return {"error": f"Argumentos desconhecidos: {', '.join(unknown)}."}
+    missing = [k for k in schema["required"] if k not in args]
+    if missing:
+        return {"error": f"Faltam argumentos: {', '.join(missing)}."}
+    function, identity = _TOOLS[name]
+    channel = {"customer_id": customer_id, "phone": phone, "thread_id": thread_id}
+    return function(**args, **{k: channel[k] for k in identity})

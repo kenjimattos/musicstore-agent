@@ -216,3 +216,76 @@ def get_order_items(conn, order_id: int) -> list[dict]:
         "JOIN products p ON p.product_id = i.product_id WHERE i.order_id = :order_id ORDER BY i.product_id",
         {"order_id": order_id},
     ))
+
+
+# ---------- escritas restritas (simulação de exclusão de dados e encaminhamento) ----------
+# Únicas escritas que o agente alcança, e só `INSERT` em tabelas próprias: nenhuma altera
+# customers, orders, order_items, products nem promotions. Ficam fora das 6 tabelas dos CSVs,
+# então um novo ingest nunca as apaga (ver `create_request_tables`, chamado pelo ingest).
+
+_REQUEST_TABLES = (
+    "CREATE TABLE IF NOT EXISTS data_requests ("
+    "request_id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, thread_id TEXT, "
+    "requested_at TEXT NOT NULL, status TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS support_tickets ("
+    "ticket_id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, phone TEXT, order_id INTEGER, "
+    "reason TEXT NOT NULL, summary TEXT NOT NULL, thread_id TEXT, created_at TEXT NOT NULL, status TEXT NOT NULL)",
+)
+
+
+def create_request_tables(conn) -> None:
+    for ddl in _REQUEST_TABLES:
+        conn.execute(ddl)
+
+
+def insert_data_request(customer_id: int, thread_id: str | None, requested_at: str) -> tuple[int, bool]:
+    """Registra o pedido de exclusão. Devolve (request_id, já_existia): idempotente por cliente."""
+    conn = connect_rw()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        create_request_tables(conn)
+        row = conn.execute(
+            "SELECT request_id FROM data_requests WHERE customer_id = :customer_id AND status = 'pending' "
+            "ORDER BY request_id LIMIT 1",
+            {"customer_id": customer_id},
+        ).fetchone()
+        if row:
+            conn.commit()
+            return row[0], True
+        cursor = conn.execute(
+            "INSERT INTO data_requests (customer_id, thread_id, requested_at, status) "
+            "VALUES (:customer_id, :thread_id, :requested_at, 'pending')",
+            {"customer_id": customer_id, "thread_id": thread_id, "requested_at": requested_at},
+        )
+        conn.commit()
+        return cursor.lastrowid, False
+    finally:
+        conn.close()
+
+
+def insert_ticket(*, customer_id: int | None, phone: str | None, order_id: int | None, reason: str,
+                  summary: str, thread_id: str | None, created_at: str) -> tuple[int, bool]:
+    """Abre o chamado. Devolve (ticket_id, já_existia): idempotente por (cliente ou telefone, pedido, motivo)."""
+    params = {"customer_id": customer_id, "phone": phone, "order_id": order_id, "reason": reason,
+              "summary": summary, "thread_id": thread_id, "created_at": created_at}
+    conn = connect_rw()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        create_request_tables(conn)
+        row = conn.execute(
+            "SELECT ticket_id FROM support_tickets WHERE status = 'open' AND customer_id IS :customer_id "
+            "AND phone IS :phone AND order_id IS :order_id AND reason = :reason ORDER BY ticket_id LIMIT 1",
+            params,
+        ).fetchone()
+        if row:
+            conn.commit()
+            return row[0], True
+        cursor = conn.execute(
+            "INSERT INTO support_tickets (customer_id, phone, order_id, reason, summary, thread_id, created_at, status) "
+            "VALUES (:customer_id, :phone, :order_id, :reason, :summary, :thread_id, :created_at, 'open')",
+            params,
+        )
+        conn.commit()
+        return cursor.lastrowid, False
+    finally:
+        conn.close()
