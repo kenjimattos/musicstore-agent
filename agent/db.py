@@ -149,3 +149,70 @@ def spec_options(conn, category_id: int | None = None) -> dict[str, set[str]]:
     for key, value in cursor:
         options.setdefault(key, set()).add(value)
     return options
+
+
+# ---------- repositório de clientes e pedidos (só leitura) ----------
+
+_OPEN_STATUSES = "'pending', 'confirmed', 'shipped'"
+_ORDER_SELECT = """
+SELECT o.order_id, o.customer_id, o.order_date, o.status, o.total_brl, o.payment_method,
+       o.tracking_code, o.estimated_delivery, o.notes, c.city
+  FROM orders o JOIN customers c ON c.customer_id = o.customer_id
+"""
+
+
+def find_customer_by_phone(conn, digits: str) -> dict | None:
+    """Compara só os dígitos: o telefone da base vem formatado, '(67) 99654-7821'."""
+    rows = _rows(conn.execute(
+        "SELECT customer_id, name FROM customers WHERE "
+        "replace(replace(replace(replace(replace(phone, ' ', ''), '(', ''), ')', ''), '-', ''), '+', '') = :digits "
+        "ORDER BY customer_id LIMIT 1",
+        {"digits": digits},
+    ))
+    return rows[0] if rows else None
+
+
+def get_order_owner_contact(conn, order_id: int) -> dict | None:
+    """E-mail e telefone do dono do pedido. Só para conferir a identidade do visitante; nunca sai da tool."""
+    rows = _rows(conn.execute(
+        "SELECT c.email, c.phone FROM orders o JOIN customers c ON c.customer_id = o.customer_id "
+        "WHERE o.order_id = :order_id",
+        {"order_id": order_id},
+    ))
+    return rows[0] if rows else None
+
+
+def get_order(conn, order_id: int, customer_id: int | None = None) -> dict | None:
+    """Um pedido; com `customer_id`, só se for dele."""
+    rows = _rows(conn.execute(
+        _ORDER_SELECT + " WHERE o.order_id = :order_id AND (:customer_id IS NULL OR o.customer_id = :customer_id)",
+        {"order_id": order_id, "customer_id": customer_id},
+    ))
+    return rows[0] if rows else None
+
+
+def ranked_orders(conn, customer_id: int, recent_cutoff: str, limit: int = 6) -> list[dict]:
+    """Pedidos do cliente por relevância: em aberto > entregue desde `recent_cutoff` > o resto.
+
+    Dentro de cada grupo, do mais recente para o mais antigo.
+    """
+    sql = (
+        _ORDER_SELECT
+        + " WHERE o.customer_id = :customer_id ORDER BY CASE"
+        f" WHEN o.status IN ({_OPEN_STATUSES}) THEN 0"
+        " WHEN o.status = 'delivered' AND o.estimated_delivery >= :cutoff THEN 1"
+        " ELSE 2 END, o.order_date DESC, o.order_id DESC LIMIT :limit"
+    )
+    return _rows(conn.execute(sql, {"customer_id": customer_id, "cutoff": recent_cutoff, "limit": limit}))
+
+
+def count_orders(conn, customer_id: int) -> int:
+    return conn.execute("SELECT COUNT(*) FROM orders WHERE customer_id = :c", {"c": customer_id}).fetchone()[0]
+
+
+def get_order_items(conn, order_id: int) -> list[dict]:
+    return _rows(conn.execute(
+        "SELECT i.product_id, p.name, i.quantity FROM order_items i "
+        "JOIN products p ON p.product_id = i.product_id WHERE i.order_id = :order_id ORDER BY i.product_id",
+        {"order_id": order_id},
+    ))

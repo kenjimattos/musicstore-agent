@@ -366,7 +366,7 @@ def test_ranking_first_order_is_in_detail_and_the_others_are_summaries(synthetic
     result = tools.get_my_orders(customer_id=PEDRO)
     assert result["total_orders"] == 8
     assert result["order"]["order_id"] == 203
-    assert [i["quantity"] for i in result["order"]["items"]] == [1, 2]  # 2 itens: detalhe completo
+    assert {(i["product_id"], i["quantity"]) for i in result["order"]["items"]} == {(95, 1), (82, 2)}  # detalhe completo
     assert [o["order_id"] for o in result["other_orders"]] == [201, 202, 204, 206, 19]  # só 5 dos 7 restantes
     assert result["other_orders"][0] == {
         "order_id": 201,
