@@ -83,13 +83,19 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
   - O modelo só precisa escolher a tool certa e redigir a resposta, o que é tarefa de modelo pequeno.
 - **Custo:** o output_guard é **determinístico, sem LLM**. No fluxo normal são 2 chamadas ao Haiku por turno (guard + agente). Mensagens bloqueadas param no guard. Uma chamada extra só acontece no retry, quando a resposta reprova.
 - **Memória:** tabela `messages` (`thread_id`, `role`, `content` JSON, `created_at`) no mesmo banco.
-  - A cada turno, carrega o histórico do thread e acrescenta as mensagens novas, inclusive tool_use/tool_result, para o modelo manter o contexto.
-  - As conversas sobrevivem a restart.
+  - O banco guarda tudo, inclusive os `tool_use`/`tool_result`, e as conversas sobrevivem a restart. Auditoria e replay dependem disso.
+  - **Política de histórico (contra poluição de contexto):** o que vai ao modelo é uma visão do histórico, montada por `build_history(thread_id)` em `agent.py`:
+    - **só os últimos 10 turnos do cliente**, cortando sempre numa mensagem do usuário, para nunca separar um `tool_use` do seu `tool_result`;
+    - **resultados de tools de turnos anteriores viram um marcador curto** (`[resultado de consulta anterior omitido]`). Os blocos `tool_use`/`tool_result` continuam presentes, porque a API exige o par; só o conteúdo é trocado. Os resultados completos ficam só no turno atual;
+    - o texto da conversa (mensagens do cliente e respostas do agente) é mantido, então "e no PIX?" continua entendendo de qual produto se fala.
+  - **Consequência assumida:** para repetir preço, estoque ou status em um turno novo, o agente consulta a tool de novo. A regra vai no prompt e é coerente com o manual: nunca informar preço, estoque ou prazo sem consultar o sistema. Custo: uma ida a mais ao modelo nesses follow-ups (2 idas, dentro do limite). Em troca, o valor citado nunca é de uma consulta antiga que pode ter mudado.
+  - **Fontes do output_guard:** resultados de tools do **turno atual** + `politicas.md`. Um valor em R$ que só aparece em resposta de turno anterior reprova e dispara o retry com feedback.
 - **Prompt caching:** o system prompt tem dois blocos.
-  1. **Bloco fixo**, com `cache_control`: persona + regras + few-shot + manual. É igual para todos os clientes, então o cache vale entre conversas.
+  1. **Bloco fixo**, com `cache_control`: persona + regras + few-shot + políticas curadas. É igual para todos os clientes, então o cache vale entre conversas.
   2. **Bloco dinâmico**, depois do fixo e fora do cache. Leva `Cliente: Ana (identificada pelo telefone)` ou `Cliente: visitante (número não cadastrado)`, a `REFERENCE_DATE` e o tom detectado no turno.
      - Do cadastro, vai só o primeiro nome e o status: nunca e-mail, telefone ou pedidos.
-     - Como fica depois do bloco cacheado, mudar de cliente ou de turno não invalida o cache do manual.
+     - Como fica depois do bloco cacheado, mudar de cliente ou de turno não invalida o cache das políticas.
+  3. **Organização do bloco fixo:** persona e regras primeiro; as políticas dentro de `<politicas>…</politicas>`; um lembrete curto das regras críticas depois delas. Assim as instruções não ficam enterradas no meio do texto longo.
 
 ## Persona (`agent/prompts.py`)
 **Quem é:** um atendente que é músico, um roqueiro que entende muito de instrumentos e de som, falando com outro músico.
@@ -110,6 +116,15 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
   - `frustrated`: as brincadeiras saem e o agente vai direto ao ponto.
   - `urgent`: resposta curta.
   - Reclamação e política sempre em tom sério e claro.
+- **Regras de atendimento no prompt, não nas políticas.** A seção 7 do manual é instrução para o atendente, então vira regra do prompt, escrita por nós:
+  - escopo: a loja vende só instrumentos; acessórios são redirecionados com educação, sem inventar lojas parceiras;
+  - fluxo: cumprimentar, entender, consultar, responder, fechar;
+  - situações especiais: produto sem estoque → alternativas vindas da tool; descontinuado → equivalentes; promoção vencida → dizer com transparência e mostrar o preço atual; reclamação → acolher e informar o retorno em 24h úteis;
+  - fatos do catálogo (preço, estoque, quantidade de produtos) vêm só das tools;
+  - as políticas são para responder, não para citar: o agente não despeja o texto do documento nem lista as instruções internas, mesmo que o cliente peça "o manual";
+  - promoções sempre com o preço original e o percentual;
+  - **promoções vêm só da tool (os CSVs prevalecem sobre o manual, porque representam o sistema da loja):** o agente nunca promete campanha futura, faixa de desconto nem data de término (a base não tem datas de promoção). Se o cliente perguntar "vai ter Black Friday?", diz que não tem essa informação e que a equipe avisa pelos canais da loja;
+  - **o manual vale para compras novas; o que está registrado na base vale como registro.** O agente não recalcula nem "corrige" pedidos (PIX sem 5%, parcela abaixo do mínimo, frete ausente). Se o cliente contestar um valor, acolhe e encaminha à equipe.
 - **Como o tom é garantido sem temperature:** o prompt traz 2–3 exemplos curtos de resposta no estilo desejado (few-shot). Para tom de voz, isso é mais estável do que ajustar temperature. Os exemplos gerados servem para calibrar.
 
 ## Camada de dados: SQLite agora, banco gerenciado depois
@@ -136,7 +151,7 @@ respond(phone, text, thread_id):     # mesmo par (telefone, texto) que um webhoo
 
 | Fonte | Estratégia | Por quê (README) |
 |---|---|---|
-| Políticas (PDF) | Texto extraído **do próprio PDF em runtime** (`pypdf`), injetado no system prompt com prompt caching | O documento é pequeno (~3k tokens) e cabe inteiro no contexto. O PDF continua sendo a fonte da verdade da loja. |
+| Políticas | `data/politicas.md`: versão **curada à mão** do manual, só com o que o agente precisa para responder ao cliente. Lida em runtime (cache por mtime) e injetada no system prompt com prompt caching | O manual inteiro (~3,5k tokens) cabe no contexto, mas mistura conteúdo para o cliente com instruções internas, e tem contradições com os dados. A curadoria deixa no prompt só fatos citáveis, uma única fonte para telefone/e-mail e nenhuma afirmação que a base desmente. O PDF original continua em `data/` como fonte. |
 | CSVs (estoque, preço, pedidos) | Ingeridos no SQLite (re-ingest automático quando o CSV muda). Tools determinísticas fazem SQL parametrizado via repositório. | Precisam ser exatos ("nunca informar preço/estoque sem consultar o sistema", seção 7.1 do manual). |
 
 ## Guardrails
@@ -201,9 +216,11 @@ Serve para revisar abuso (de clientes ou funcionários) e respostas ruins.
 ## Atualização fácil de políticas e dados
 A loja substitui arquivos em `data/`, sem mexer em código e sem reiniciar o app.
 - **Políticas:**
-  - o PDF é localizado por glob (`*.pdf`) e o texto é cacheado pelo mtime;
-  - o system prompt é montado a cada invocação, então a nova versão vale na próxima mensagem;
-  - o cache do prompt só é refeito quando o PDF muda.
+  - **a ingestão deixa de ser automática:** o agente lê `data/politicas.md`, não o PDF. Para atualizar, a loja edita esse arquivo de texto (mais fácil de editar que um PDF), sem mexer em código;
+  - o arquivo é lido com cache por mtime e o system prompt é montado a cada invocação, então a nova versão vale na próxima mensagem, sem reiniciar o app;
+  - o cache do prompt só é refeito quando o arquivo muda;
+  - **o custo dessa escolha:** um PDF novo da loja exige uma curadoria humana antes de valer. O README diz isso, junto com o que a curadoria faz (abaixo);
+  - **proteção contra erro de transcrição:** um teste confere que todo valor em R$, percentual, horário e prazo em dias de `politicas.md` aparece também no texto do PDF original. Isso pega número digitado errado, mas não pega política desatualizada.
 - **Dados:**
   - os CSVs são achados por sufixo (`*products.csv`…), então tanto o nome limpo atual (`products.csv`) quanto o nome do export do Google Sheets funcionam; basta re-exportar e colar;
   - `DATA_DIR` é configurável por env.
@@ -223,9 +240,9 @@ musicstore-agent/
 │   ├── tools.py           # funções read-only + TOOL_SCHEMAS + dispatch
 │   ├── db.py              # sqlite3: conexões (ro p/ tools, rw p/ escrita) + repositório (SQL parametrizado)
 │   ├── ingest.py          # CSV → validar/limpar → tabelas; re-ingest por mtime
-│   ├── policies.py        # PDF → texto, cache por mtime
+│   ├── policies.py        # lê data/politicas.md, cache por mtime
 │   └── audit.py           # insert em audit_log
-├── data/                  # CSVs e PDF como recebidos (substituíveis); store.db gerado (gitignore)
+├── data/                  # CSVs e PDF como recebidos; politicas.md (curado); store.db gerado (gitignore)
 ├── examples/              # 5 conversas .md geradas
 ├── scripts/generate_examples.py
 ├── tests/
@@ -280,12 +297,44 @@ musicstore-agent/
   - discontinued → não vende, mesmo com estoque;
   - coming_soon → "em breve".
 - **Promoções:** só `is_active=1`. Se houver várias, usar o maior desconto.
-- **Inconsistências mantidas nos arquivos e tratadas no prompt/README:**
-  - WhatsApp: 3341-4444 vs 3321-4500. Usar o da seção 1.2.
-  - E-mail com e sem acento.
-  - A descrição do produto 144 (Roland) diz "Yamaha".
-  - Categorias 6–8 estão vazias.
-  - O manual diz "300+ instrumentos", mas há 64 no CSV.
+- **Curadoria das políticas (`data/politicas.md`), documentada no README:**
+  - **Fica:** o que o cliente pode perguntar e o agente pode afirmar, **sem nada que conflite com a base**: a loja e o que ela vende (1, sem o tamanho do catálogo nem a lista de categorias), dados da empresa (1.2, com um único telefone e um único e-mail), horário (2), pagamento e parcelamento (3), trocas e devoluções (4), frete e rastreamento (5), promoções (6, **só as regras da 6.2**), garantia (8) e privacidade (9).
+  - **Sai:** capa e rodapés de página, missão, a seção 7 (instrução para o atendente, que vira regra do prompt), as disposições finais e **tudo que conflita com a base**: o calendário de campanhas e as faixas de desconto (6.1), "mais de 300 instrumentos" e a lista de categorias do texto de abertura.
+  - **Regra da curadoria:** se o manual afirma um fato sobre o catálogo ou as promoções e a base discorda, o fato não entra no `politicas.md`. O agente obtém esse tipo de informação das tools, que representam o sistema da loja.
+  - **Contatos:** telefone e e-mail aparecem em variantes divergentes no próprio manual. Entra só a variante coerente (telefone da capa e da seção 1.2; e-mail sem acento). A variante divergente não entra.
+  - **Contradições resolvidas na curadoria, e não deixadas para o modelo** (detalhes na tabela "Conflitos entre o manual e a base", logo abaixo): itens 1 a 7.
+  - **O arquivo não inventa política:** só remove e resolve contradições. O teste do PDF garante que nenhum número novo entrou.
+- **Conflitos entre o manual e a base (README, seção própria).** O manual e os dados entregues se contradizem em vários pontos. Parte deles parece **proposital, uma armadilha para ver se o agente repete o manual sem checar**. Todos ficam registrados, com a decisão de cada um:
+
+  | # | Item | Manual | Base | Decisão |
+  |---|---|---|---|---|
+  | 1 | Telefone | (67) 3341-4444 na capa e na seção 1.2; (67) 3321-4500 na seção 7 | n/a | Só 3341-4444 (2 de 3 ocorrências, e é o da tabela de dados da empresa). O número divergente sai do `politicas.md` |
+  | 2 | E-mail | `emporiodamusica` na capa; `empóriodamusica` (com acento, domínio inválido) na seção 1.2 | n/a | Só `contato@emporiodamusica.com.br` |
+  | 3 | Tamanho do catálogo | "mais de 300 instrumentos" | 64 produtos | A frase sai do `politicas.md`; o tamanho vem das tools |
+  | 4 | Categorias | cita sopro (madeiras e metais) e cordas orquestrais | as 3 categorias existem, **sem nenhum produto** | A lista de categorias sai do `politicas.md`. O agente consulta `list_categories` e diz que não há itens dessas categorias no momento |
+  | 5 | Campanhas | Aniversário da Loja, Black Friday, Volta às Aulas, Queima de Estoque, Semana do Músico | 4 campanhas fora do manual (Liquidação de Inverno, Oferta Especial, Promoção de Páscoa, Desconto Exclusivo); Volta às Aulas não aparece | O calendário de campanhas (6.1) sai do `politicas.md`. A campanha que vale é a que a tool devolve, com o nome da base |
+  | 6 | Faixas de desconto | Black Friday 15–30% "em todo o catálogo"; Aniversário 10–25% | Black Friday de 10% (promoção 1) e de 25% e 30%, só em 3 produtos; Aniversário de 30% (promoção 17) | As faixas e o "todo o catálogo" saem do `politicas.md`. Desconto vigente só vem da tool |
+  | 7 | Promoções ativas | calendário de campanhas | só **4 ativas**, todas de campanhas fora do manual (127 a 10%, 121 a 20%, 90 a 18%, 94 a 8%); sem data de início nem de fim | Só `is_active=1` conta. O agente nunca informa data de término nem promete campanha futura |
+  | 8 | Promoções repetidas | n/a | os produtos 93, 96 e 99 têm 2 promoções cada, todas inativas (a do 96 chega a 40%, com estoque 0) | Irrelevante hoje; a regra "maior desconto entre as ativas" cobre o caso |
+  | 9 | Desconto de 5% no PIX | 5% sobre o preço de tabela | os 5 pedidos em PIX (1, 5, 10, 13, 17) têm total igual ao preço de tabela | O agente não diz que o cliente "pagou com 5%" e não recalcula pedidos |
+  | 10 | Parcela mínima | R$ 80 (4–6x) e R$ 100 (7–12x) | pedidos 9 (6x de R$ 58,32), 16 (6x de R$ 71,65) e 18 (12x de R$ 38,32, cancelado) | Mesma decisão: o pedido mostra o que foi registrado; a regra vale para compras novas |
+  | 11 | Frete de R$ 35 abaixo de R$ 500 | taxa fixa na região metropolitana | pedidos 7, 8, 9, 11 e 16 (Campo Grande, abaixo de R$ 500) têm total igual ao preço de tabela, sem frete | Idem |
+  | 12 | Totais de pedido | n/a | pedidos 3 e 20 têm total menor que a soma dos preços de tabela (R$ 48 e R$ 88), sem promoção que explique | Idem; se o cliente questionar, encaminha à equipe |
+  | 13 | Descrição do produto 144 | n/a | o Roland Synth 3 Pro descreve um "teclado arranjador Yamaha" | Nome e preço vêm dos campos; a descrição é repassada como está, e o conflito fica registrado |
+
+  - **Regra de precedência entre as fontes (decisão registrada no README):** os CSVs representam o **sistema da loja**, então, para **dados**, eles prevalecem sobre o manual. O manual vale para **regras e procedimentos**.
+
+    | Tipo de informação | Fonte que prevalece | Por quê |
+    |---|---|---|
+    | Promoções, preços, estoque, status de produto e de pedido | **CSV** (via tools) | É o que o sistema da loja registra. O manual descreve campanhas em geral, e a base diz o que vale hoje |
+    | Regras: devolução, garantia, frete, pagamento, horário, contatos | **Manual** (`politicas.md`) | A base não tem essas informações |
+    | Conflito entre os dois sobre um dado | **CSV**, e o conflito fica registrado | O agente nunca repete do manual um dado que a base desmente |
+
+    Consequência para promoções: se o manual promete "Black Friday de 15 a 30% em todo o catálogo" e a base tem outra coisa, o agente informa o que a base tem. Por isso as faixas de desconto saem do `politicas.md`: deixá-las ali daria ao agente (e ao output_guard) uma fonte que contradiz o sistema.
+  - **Princípio comum:** o manual vale para **compras novas**; o que está registrado na base (preço, pedido, promoção) vale como registro. O agente não faz auditoria nem "corrige" dados, e encaminha à equipe quando o cliente contesta.
+  - **Itens 1 a 4 e 6** são tratados na curadoria do `politicas.md`. **Itens 5 e 7** viram regras do prompt. **Itens 8 a 13** não exigem código, só a regra de não recalcular.
+  - **Testes e2e acrescentados:** "qual o telefone e o e-mail da loja?" responde só com 3341-4444 e o e-mail sem acento; "vai ter Black Friday? quanto de desconto?" não promete nenhuma faixa nem data; "vocês têm flauta ou trompete?" diz que não há produtos dessas categorias no momento.
+- **Inconsistências nos dados, mantidas nos arquivos e tratadas no prompt/README:** os itens 4, 8 e 13 da tabela acima, mais os cadastros duplicados:
   - **Cadastros possivelmente duplicados:**
     - Bruno 11 e Bruno 43 têm o mesmo e-mail e a mesma cidade, com telefones diferentes;
     - Diego 13 e Diego 47 têm nomes parecidos, com e-mail, telefone e cidade diferentes.
@@ -321,7 +370,7 @@ uv run streamlit run app.py
 ```
 O uv instala o Python 3.11+ e as dependências. O README também terá a alternativa com `pip install -e .`.
 
-**Dependências:** `anthropic`, `pandas`, `pypdf`, `streamlit`, `python-dotenv`, `pytest` (dev).
+**Dependências:** `anthropic`, `pandas`, `streamlit`, `python-dotenv`; `pytest` e `pypdf` só em dev (o `pypdf` é usado apenas pelo teste das políticas).
 
 **Testes:**
 - `uv run pytest`: roda só os testes sem custo. O `addopts = -m "not llm and not e2e"` fica no pyproject.
@@ -358,6 +407,12 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     - Por isso a fixture do teste insere pedidos extras **só na cópia temporária dos CSVs**, sem alterar `data/`. (Na cópia e não no banco, porque o re-ingest por mtime apagaria linhas inseridas direto no banco.)
     - A mesma fixture cobre o "sim, pode devolver": um pedido entregue há 3 dias. Nenhum pedido real cai na janela de 7 dias na `REFERENCE_DATE`.
   - a memória: "e no PIX?" no 2º turno é respondido sem repetir o nome do produto.
+  - **a política de histórico** (`test_long_conversation`, e2e): uma conversa de 12 turnos em que o cliente explora o catálogo (Takamine GD20, Taylor 110e, um violão de nylon, outro de aço…) e, no fim, volta a perguntar o preço de um produto do começo. O teste confere que:
+    - a requisição enviada ao modelo no último turno contém no máximo os 10 turnos mais recentes e **nenhum `tool_result` completo de turno anterior**, só o marcador;
+    - todo `tool_use` da requisição tem seu `tool_result` (o corte não quebra o par);
+    - o preço citado no último turno é o do banco, vindo de uma consulta do próprio turno (`search_products` chamada de novo), e não o de uma consulta antiga;
+    - o tamanho da requisição (tokens estimados) não cresce de forma linear com o número de turnos.
+  - **os testes unitários da `build_history`** (sem LLM, no `pytest` padrão): janela de 10 turnos, corte sempre em mensagem do usuário, `tool_result` antigo trocado pelo marcador e `tool_result` do turno atual intacto.
 - **`test_ui.py`:** usa o Streamlit AppTest (`streamlit.testing.v1`), que é headless, leve e sem Playwright nem navegador. Verifica que:
   - selecionar um cliente na sidebar faz o agente cumprimentá-lo pelo nome;
   - o painel de dados mostra os pedidos do cliente selecionado e não mostra os de outros clientes;
@@ -383,15 +438,16 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 | 2 | `test(e2e): acceptance scenarios` | `tests/e2e/scenarios.py` + `test_conversations.py`. É a especificação do comportamento do agente, escrita antes de tudo. | verde no padrão; `-m e2e` vermelho até o commit 15 |
 | 3 | `test(data): ingest and validation` | `conftest.py` (tmp data + `DB_PATH`), `test_ingest.py` (tabelas criadas, coluna faltando → erro claro, re-ingest por mtime, `search_text` sem acento) | vermelho |
 | 4 | `feat(data): ingest CSVs into SQLite` | `db.py` (conexões rw/ro), `ingest.py` | verde |
-| 5 | `test(data): policies from PDF` | texto contém "Horário de Funcionamento", cache por mtime | vermelho |
-| 6 | `feat(data): load store policies from PDF` | `policies.py` | verde |
+| 5 | `test(data): curated policies` | `politicas.md` contém as seções-chave (horário, pagamento e parcelamento, arrependimento, frete); todo R$, %, horário e prazo em dias dele existe no texto do PDF; não contém marcas internas ("uso restrito", seção de atendimento); **não contém conteúdo que conflita com a base**: `3321-4500`, `empóriodamusica`, "300", as faixas de desconto (15%, 30%…) e o calendário de campanhas ("Volta às Aulas", "Semana do Músico"); cache por mtime | vermelho |
+| 6 | `feat(data): curated policies file and loader` | `data/politicas.md` (curadoria do manual) + `policies.py` | verde |
 | 7 | `test(tools): product search and details` | bordas (96 sem estoque, 113 descontinuado, 130 em breve, promoção ativa do 94, PIX não acumula com promoção, parcelas pela regra 3.1), SQL injection, `%` escapado | vermelho |
 | 8 | `feat(tools): product search and details` | `search_products`, `get_product_details`, `list_categories` + repositório | verde |
 | 9 | `test(tools): order lookup and customer isolation` | `identify_customer` acha a Ana por "(67) 99654-7821" e por "67996547821", e um número desconhecido vira visitante; Ana vê o pedido 8 em detalhe com `is_late=true`; Ana pedindo o 14 → não encontrado; visitante com e-mail errado → negado; **cadastros parecidos:** os telefones de Bruno 11 e Bruno 43 resolvem para ids diferentes; Bruno 43 pedindo o pedido 10 (do Bruno 11) → não encontrado, mesmo informando o e-mail que os dois compartilham; visitante com pedido 10 + `bruno.martins@jmail.com` → liberado, porque o e-mail é do dono do pedido; Diego 47 pedindo o 14 (do Diego 13) → não encontrado; **ranking:** com pedidos sintéticos na fixture, a ordem é aberto > entregue recente > antigo/cancelado, com no máximo 5 no resumo e `total_orders` correto; `days_since_delivery` com `REFERENCE_DATE`; sem e-mail/telefone no retorno | vermelho |
 | 10 | `feat(tools): order lookup with customer isolation` | `identify_customer(phone)`, `get_my_orders` (ranking em SQL), injeção de `customer_id` | verde |
 | 11 | `test(guards): deterministic output guard` | R$ inventado reprova; produto não consultado reprova; valores da tool aprovam; código de rastreio inventado reprova | vermelho |
 | 12 | `feat(guards): deterministic output guard` | `output_guard` | verde |
-| 13 | `feat(agent): tool-use loop with persona and history` | `agent.py` (loop, `MAX_TOOL_ITERATIONS`, retry + `safe_fallback`), `prompts.py` (persona, few-shot, manual com cache), `TOOL_SCHEMAS` + dispatch, `trace`, tabela `messages`, `__main__.py` | verde; parte do e2e passa |
+| 12b | `test(agent): history window` | `tests/test_history.py`: janela de 10 turnos, corte sempre em mensagem do usuário (sem separar `tool_use` de `tool_result`), `tool_result` antigo trocado pelo marcador, `tool_result` do turno atual intacto. Sem LLM. (Sub-passo de TDD sem renumerar a tabela.) | vermelho |
+| 13 | `feat(agent): tool-use loop with persona and history` | `agent.py` (loop, `MAX_TOOL_ITERATIONS`, retry + `safe_fallback`, `build_history`), `prompts.py` (persona, regras de atendimento, few-shot, políticas curadas com cache), `TOOL_SCHEMAS` + dispatch, `trace`, tabela `messages`, `__main__.py` | verde; parte do e2e passa |
 | 14 | `test(guards): input classifier cases` | `test_input_guard.py` (adversariais + tom) | verde no padrão; `-m llm` vermelho |
 | 15 | `feat(guards): input classifier with scope, manipulation and tone` | `input_guard` + templates de recusa + tom no prompt | `-m llm` e `-m e2e` verdes |
 | 16 | `feat(audit): audit log table` | `audit.py` + teste simples (uma linha por turno) | verde |
@@ -432,6 +488,10 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 - Decisões técnicas.
 - Guardrails e segurança, incluindo proteção de dados de clientes (LGPD).
 - Como atualizar políticas e dados, incluindo o aviso de que os testes de aceite são ancorados nos dados entregues (seção "Testes e2e").
+  - **Políticas:** editar `data/politicas.md`. Um PDF novo da loja precisa de curadoria antes de valer, com o que fica, o que sai e as contradições resolvidas.
+- **Precedência das fontes:** os CSVs (sistema da loja) prevalecem sobre o manual para dados como promoções, preços e estoque; o manual vale para regras e procedimentos. Inclui a tabela de quem prevalece em cada tipo de informação.
+- **Conflitos entre o manual e a base:** a tabela de 13 itens, com a decisão de cada um, e o princípio "manual para compras novas, base como registro". Registra explicitamente o telefone e o e-mail divergentes, as campanhas e faixas de desconto que não batem com a tabela de promoções e os pedidos que não seguem as regras de pagamento e frete.
+- Política de histórico e contexto: por que os resultados de tools antigos são omitidos e o que isso custa.
 - Tratamento de dados e suposições.
 - Limitações e próximos passos:
   - Postgres (mudança isolada em `db.py`);
@@ -466,6 +526,9 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     | Guard de saída | Juiz LLM | Custo de uma chamada extra por turno | Checagem determinística de fatos (R$, produtos, códigos), com as tools devolvendo os valores já calculados |
     | Banco | CSVs em memória → SQLAlchemy | Migração futura para banco; "precisa de SQLAlchemy?" | `sqlite3` + padrão de repositório + queries parametrizadas e conexão somente leitura nas tools |
     | Modelo | Sonnet no agente, Haiku no guard | Economia de tokens | Haiku em tudo, viabilizado por tools que fazem as contas e pelo guard determinístico |
+    | Políticas no prompt | Manual inteiro, extraído do PDF em runtime | "Quero ver o tamanho" → ~3,5k tokens, com ruído de extração, instruções internas e contradições com os dados. "Só o que interessa ao agente; a ingestão deixaria de ser automática" | `politicas.md` curado à mão, com teste que confere os números contra o PDF. Custo assumido: PDF novo exige curadoria |
+    | Conflitos manual × base | Confiar no manual como fonte única | "O telefone errado pode ser uma pegadinha; veja se as promoções estão alinhadas com a base" → o cruzamento achou 13 conflitos (telefone e e-mail, catálogo, campanhas e faixas de desconto, e pedidos fora das regras de PIX, parcela e frete) | Regra de precedência: o CSV (sistema da loja) prevalece sobre o manual para dados, incluindo promoções; o manual vale para regras. Tabela de conflitos com decisão por item; faixas de desconto e telefone divergente saem do prompt; manual vale para compras novas, base vale como registro |
+    | Contexto da conversa | Reenviar o histórico inteiro, com tool results | "Podemos cair em poluição de contexto?" | Janela de 10 turnos, resultados antigos omitidos, e teste e2e de conversa longa |
     | Perguntas complexas | Rotear para um modelo maior pelo input_guard | "Isso já é multi-agente? É overengineering?" | Adiado: é roteamento de modelo, não multi-agente, e seria otimizar sem evidência. Primeiro medir pelo `audit_log`; depois `effort`, roteamento e handoff humano, nessa ordem |
     | Identidade do cliente | Número do pedido + e-mail no chat | "Teremos login?" | Canal WhatsApp: `respond(phone, text)`, cliente resolvido pelo telefone em código, nunca pelo LLM |
     | Persona | Atendente genérico com temperature 0 | Atendente deve ser músico; "temperatura não zerada?" | Roqueiro com descoberta do estilo do cliente; tom via few-shot, porque o modelo não aceita temperature |
