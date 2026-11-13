@@ -43,3 +43,4 @@ sequence of decisions and corrections stays readable.
 29. **Docs:** `CLAUDE.md` requires a changelog update in every commit.
 30. **Test:** deterministic output guard (amounts, products, codes, contacts, dates, stock, percentages); red until the implementation lands.
 31. **Changed:** changelog entries are listed in chronological order instead of grouped by type.
+32. **Added:** deterministic output guard: amounts, products, codes, contacts, dates, deadlines, stock and percentages must come from this turn's tool results or the policies.

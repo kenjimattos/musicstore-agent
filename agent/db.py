@@ -116,6 +116,11 @@ def get_product(conn, product_id: int) -> dict | None:
     return rows[0] if rows else None
 
 
+def get_product_names(conn) -> list[str]:
+    """Nome de todo produto do catálogo (qualquer status), para o output_guard reconhecer menções."""
+    return [r[0] for r in conn.execute("SELECT name FROM products")]
+
+
 def find_alternatives(conn, product: dict, limit: int = 3) -> list[dict]:
     """Mesma categoria, disponíveis, os de preço mais próximo do produto."""
     sql = (
