@@ -3,7 +3,7 @@
 Fluxo (if/else explícitos, sem framework):
   identificar o cliente pelo telefone -> loop de tool use (SDK anthropic) -> output_guard
   (1 retry com feedback; reprovou de novo -> safe_fallback abre um chamado) -> gravar histórico.
-O input_guard entra no commit 15; até lá toda mensagem segue como in_scope/neutral.
+O input_guard (classificador Haiku) roda antes do agente: mensagem barrada recebe um template e para ali.
 """
 
 import json
@@ -71,6 +71,7 @@ class ToolCall:
 class Trace:
     guard_category: str = "in_scope"
     guard_tone: str = "neutral"
+    guard_reason: str = ""
     blocked: bool = False
     tool_calls: list[ToolCall] = field(default_factory=list)
     iterations: int = 0
@@ -176,10 +177,16 @@ def respond(phone: str, text: str, thread_id: str) -> Reply:
     trace = Trace()
     customer = tools.identify_customer(phone)
     customer_id = customer["customer_id"] if customer else None
-    # TODO(commit 15): input_guard aqui; bloqueado -> template de recusa, sem chamar o agente.
+    verdict = guards.input_guard(text, build_history(thread_id))
+    trace.guard_category, trace.guard_tone, trace.guard_reason = verdict.category, verdict.tone, verdict.reason
+    db.save_message(thread_id, "user", text)
+    if verdict.category != "in_scope":  # barrado: template fixo, o agente nem é chamado
+        trace.blocked = True
+        refusal = guards.REFUSALS[verdict.category]
+        db.save_message(thread_id, "assistant", [{"type": "text", "text": refusal}])
+        return Reply(refusal, trace)
 
     system = prompts.build_system(policies.load_policies(), customer, tools.today(), trace.guard_tone)
-    db.save_message(thread_id, "user", text)
     messages = build_history(thread_id)
     identity = {"customer_id": customer_id, "phone": phone, "thread_id": thread_id}
     turn_results: list[dict] = []  # fontes do output_guard: só as tools do turno atual

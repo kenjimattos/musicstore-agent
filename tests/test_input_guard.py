@@ -16,9 +16,14 @@ Regra de decisão: `out_of_scope` só para o que é claramente alheio à loja; n
 (acessórios, privacidade, reclamação) são do agente, que conhece as políticas.
 """
 
-import pytest
+import os
 
-pytestmark = pytest.mark.llm
+import pytest
+from dotenv import load_dotenv
+
+load_dotenv()
+pytestmark = [pytest.mark.llm,
+              pytest.mark.skipif(not os.environ.get("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY ausente")]
 
 
 def verdict(text, history=None):
