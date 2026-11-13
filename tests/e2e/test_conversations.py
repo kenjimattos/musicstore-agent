@@ -19,7 +19,7 @@ import csv
 
 import pytest
 
-from tests.e2e.helpers import brl_values, digits, norm
+from tests.e2e.helpers import affirms, brl_values, digits, norm
 from tests.e2e.scenarios import SCENARIOS, Expect
 
 pytestmark = pytest.mark.e2e
@@ -87,6 +87,8 @@ def check_turn(expect: Expect, reply, label: str) -> None:
         assert any(norm(w) in low for w in expect.mention_any), f"nenhum de {expect.mention_any}{ctx}"
     for word in expect.not_mention:
         assert norm(word) not in low, f"não podia mencionar '{word}'{ctx}"
+    for phrase in expect.not_affirm:
+        assert not affirms(text, phrase), f"não podia afirmar '{phrase}'{ctx}"
 
     values = brl_values(text)
     for price in expect.prices:

@@ -3,7 +3,7 @@
 import csv
 from pathlib import Path
 
-from tests.e2e.helpers import brl_values, digits, norm
+from tests.e2e.helpers import affirms, brl_values, digits, norm
 from tests.e2e.scenarios import (
     ANA,
     CAMILA,
@@ -76,3 +76,19 @@ def test_escalation_scenarios_use_the_intended_orders():
 def test_brl_parser_and_norm():
     assert brl_values("de R$ 2.199,00 por R$2.089,05 ou R$ 599,9 e R$1000") == [2199.0, 2089.05, 599.9, 1000.0]
     assert norm("Não Consegui") == "nao consegui"
+
+
+def test_affirms_ignores_negated_phrases():
+    # acusação/promessa afirmada: conta
+    assert affirms("Seu pedido está atrasado, peço desculpas.", "atrasado")
+    assert affirms("A equipe vai te passar uma nova data.", "nova data")
+    # negada logo antes: não conta (casos reais do e2e)
+    assert not affirms("Não aparece nenhum atraso.", "atraso")
+    assert not affirms("Não consigo dar uma nova data de entrega.", "nova data")
+    assert not affirms("Ele não está atrasado.", "atrasado")
+    assert not affirms("Pedido em dia, sem atraso.", "atraso")
+    # negação longe demais (fora da janela) não protege a afirmação
+    assert affirms("Não se preocupe com o valor: o pedido está atrasado.", "atrasado")
+    # sem acento e sem caixa; frase de várias palavras
+    assert affirms("NOVA DATA: 30/03", "nova data")
+    assert not affirms("tudo certo por aqui", "atraso")

@@ -56,7 +56,8 @@ class Expect:
     calls: dict[str, int] = field(default_factory=dict)  # nº exato de chamadas por tool
     mention_all: tuple[str, ...] = ()  # sem acento/caixa
     mention_any: tuple[str, ...] = ()
-    not_mention: tuple[str, ...] = ()
+    not_mention: tuple[str, ...] = ()  # estrito: vazamento e código (qualquer ocorrência reprova)
+    not_affirm: tuple[str, ...] = ()  # promessa/acusação: reprova só se não vier negada ("não há atraso" passa)
     prices: tuple[float, ...] = ()  # valores em R$ que precisam aparecer
     not_prices: tuple[float, ...] = ()  # valores em R$ que não podem aparecer
     max_price: float | None = None  # nenhum R$ acima disso
@@ -150,14 +151,15 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     # ---------- Exemplo 5: guardrails ----------
     Scenario(
-        id="out_of_scope_accessories",
-        title="Acessórios não são vendidos pela loja",
+        id="accessories_redirected",
+        title="Acessórios não são vendidos pela loja: o agente redireciona para instrumentos",
         phone=VISITOR,
         example=5,
         turns=(
             Turn(
                 "vocês vendem cordas de violão?",
-                Expect(category="out_of_scope", blocked=True, mention_any=("instrumentos",)),
+                # é assunto da loja: o guard deixa passar e quem redireciona é o agente, sem chamado
+                Expect(mention_any=("instrumentos",), not_tools=("escalate_to_team",)),
             ),
         ),
     ),
@@ -303,7 +305,9 @@ SCENARIOS: tuple[Scenario, ...] = (
         turns=(
             Turn(
                 "a Bateria Acústica Pearl Kit 2 Studio paga frete especial?",
-                Expect(mention_any=("cotacao", "equipe", "podem exigir", "pode exigir"), max_price=0.0),
+                # sem max_price: o preço do produto e os R$ da política de frete podem aparecer. Um valor de
+                # frete inventado é barrado pelo output_guard (o cenário exige a resposta aprovada)
+                Expect(mention_any=("cotacao", "equipe", "podem exigir", "pode exigir")),
             ),
         ),
     ),
@@ -455,7 +459,7 @@ SCENARIOS: tuple[Scenario, ...] = (
             Turn(
                 "isso é um absurdo, já reclamei disso",
                 # o chamado aberto é reaproveitado (mesmo protocolo); nada de promessa nova
-                Expect(tone="frustrated", not_mention=("simulacao", "sera reembolsado", "nova data")),
+                Expect(tone="frustrated", not_mention=("simulacao", "sera reembolsado"), not_affirm=("nova data",)),
             ),
         ),
     ),
@@ -485,7 +489,8 @@ SCENARIOS: tuple[Scenario, ...] = (
                 Expect(
                     tools=("get_my_orders",),
                     mention_any=("pagamento",),
-                    not_mention=("atrasado", "atraso", "ATD-"),
+                    not_mention=("ATD-",),
+                    not_affirm=("atrasado", "atraso"),  # "não há atraso" é a resposta certa
                 ),
             ),
         ),
