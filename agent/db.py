@@ -8,9 +8,11 @@ Duas conexões, de propósito:
 `DATA_DIR` e `DB_PATH` vêm do env e são lidos a cada chamada, para os testes poderem trocá-los.
 """
 
+import json
 import os
 import sqlite3
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -294,3 +296,49 @@ def insert_ticket(*, customer_id: int | None, phone: str | None, order_id: int |
         return cursor.lastrowid, False
     finally:
         conn.close()
+
+
+# ---------- histórico da conversa ----------
+# Tabela fora das 6 dos CSVs: um novo ingest nunca a apaga. Guarda tudo, inclusive tool_use/tool_result;
+# o que vai ao modelo é uma visão montada por `agent.agent.build_history`.
+
+_MESSAGES_TABLE = (
+    "CREATE TABLE IF NOT EXISTS messages ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, role TEXT NOT NULL, "
+    "content TEXT NOT NULL, created_at TEXT NOT NULL)"
+)
+_MESSAGES_INDEX = "CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages (thread_id, id)"
+
+
+def create_messages_table(conn) -> None:
+    conn.execute(_MESSAGES_TABLE)
+    conn.execute(_MESSAGES_INDEX)
+
+
+def save_message(thread_id: str, role: str, content, created_at: str | None = None) -> None:
+    """Grava uma mensagem. `content` é str ou lista de blocos da API, gravado como JSON."""
+    created_at = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn = connect_rw()
+    try:
+        create_messages_table(conn)
+        conn.execute(
+            "INSERT INTO messages (thread_id, role, content, created_at) VALUES (:thread_id, :role, :content, :created_at)",
+            {"thread_id": thread_id, "role": role, "content": json.dumps(content, ensure_ascii=False),
+             "created_at": created_at},
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_messages(thread_id: str) -> list[dict]:
+    """Mensagens da thread na ordem em que foram gravadas."""
+    conn = connect_rw()
+    try:
+        create_messages_table(conn)
+        rows = conn.execute(
+            "SELECT role, content FROM messages WHERE thread_id = :thread_id ORDER BY id", {"thread_id": thread_id}
+        ).fetchall()
+    finally:
+        conn.close()
+    return [{"role": role, "content": json.loads(content)} for role, content in rows]
