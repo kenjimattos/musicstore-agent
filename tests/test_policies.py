@@ -156,3 +156,19 @@ def test_installment_rule_for_small_purchases_is_unambiguous(md):
     # como piso por parcela. A regra é: compra abaixo de R$ 50,00 não parcela.
     assert "exceto abaixo" not in md
     assert re.search(r"abaixo de R\$ 50,00 não (podem|pode) ser parcelad", md)
+
+
+def test_boundaries_and_deadlines_are_unambiguous(md):
+    # valores exatos entram na regra ("a partir de"), e todo prazo diz de quando conta
+    assert "a partir de R$ 500,00" in md and "acima de R$ 500" not in md
+    assert "a partir de R$ 2.000,00" in md and "acima de R$ 2.000" not in md
+    assert "em até 30 dias corridos após o recebimento" in md  # troca por defeito (o PDF diz "após a compra")
+    assert re.search(r"em até 7 dias após o recebimento do produto, mediante", md)  # troca por preferência
+    assert "30 dias corridos após a compra" not in md
+
+
+def test_promotion_does_not_remove_defect_or_regret_rights(md):
+    assert "A promoção não tira os direitos do cliente" in md
+    assert "venda final" in md and "só para troca por preferência" in md
+    assert "valor efetivamente pago" in md
+    assert "parcela mínima de R$ 100,00" not in md.split("### 3.1")[0]  # resumo da seção 3 não contradiz a 3.1

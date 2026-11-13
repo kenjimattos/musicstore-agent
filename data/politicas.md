@@ -31,15 +31,15 @@ Aceitamos as seguintes formas de pagamento, em compras presenciais e online:
 
 - PIX: pagamento à vista, com 5% de desconto sobre o preço de tabela.
 - Cartão de débito: pagamento à vista, todas as bandeiras aceitas.
-- Cartão de crédito: até 12x sem juros, com parcela mínima de R$ 100,00.
+- Cartão de crédito: até 12x sem juros (veja seção 3.1 Regras de parcelamento).
 - Boleto bancário: pagamento à vista, com compensação em até 3 dias úteis.
 
 ### 3.1 Regras de parcelamento
-
-- Em até 3x: sem juros e sem valor mínimo de parcela. Compras abaixo de R$ 50,00 não podem ser parceladas.
-- De 4x a 6x: sem juros, com parcela mínima de R$ 80,00.
-- De 7x a 12x: sem juros, com parcela mínima de R$ 100,00.
-- Combinação de formas de pagamento (por exemplo, PIX + cartão): permitida em compras acima de R$ 2.000,00.
+- Compras abaixo de R$ 50,00 não podem ser parceladas.
+- Em até 3x: sem juros e sem valor mínimo de parcela.
+- 4x a 6x: sem juros, permitido se a parcela for maior ou igual a R$ 80,00.
+- 7x a 12x: sem juros, permitido se a parcela for maior ou igual a R$ 100,00.
+- Combinação de formas de pagamento (por exemplo, PIX + cartão): permitida em compras a partir de R$ 2.000,00.
 
 ## 4. Trocas e devoluções
 
@@ -54,27 +54,33 @@ A loja segue as diretrizes do Código de Defesa do Consumidor (Lei nº 8.078/90)
 
 ### 4.2 Troca por defeito
 
-- Produtos com defeito de fabricação podem ser trocados em até 30 dias corridos após a compra.
+- Produtos com defeito de fabricação podem ser trocados em até 30 dias corridos após o recebimento do produto.
 - Passados os 30 dias, o cliente deve acionar a garantia diretamente com o fabricante. A loja pode intermediar o processo, mediante solicitação.
 - Danos causados por mau uso, quedas, exposição a umidade excessiva ou modificações não autorizadas não são cobertos.
 
 ### 4.3 Troca por preferência
 
-- Trocas por preferência (cor, modelo, tamanho) são permitidas em até 7 dias, mediante disponibilidade do produto desejado.
+- Trocas por preferência (cor, modelo, tamanho) são permitidas em até 7 dias após o recebimento do produto, mediante disponibilidade do produto desejado.
 - O produto deve estar em perfeito estado e na embalagem original.
 - Diferenças de valor são cobradas ou reembolsadas conforme o caso.
 
 ### 4.4 Itens não elegíveis para troca
 
 - Instrumentos com personalização ou ajustes sob encomenda (setup, regulagem especial).
-- Produtos comprados em promoções de liquidação com aviso explícito de "venda final".
+- Troca por preferência de produtos comprados em promoções de liquidação com aviso explícito de "venda final".
+
+### 4.5 Produtos comprados em promoção
+
+- A promoção não tira os direitos do cliente: defeito de fabricação (seções 4.2 e 8) e arrependimento em compras online (seção 4.1) valem para produtos em promoção ou não.
+- O aviso de "venda final" vale só para troca por preferência (seção 4.3), nunca para defeito nem para arrependimento.
+- Em troca ou devolução de produto comprado em promoção, vale o valor efetivamente pago, e não o preço de etiqueta.
 - Boquilhas de sopro, por questões de higiene.
 
 ## 5. Frete e entregas
 
 ### 5.1 Região metropolitana de Campo Grande
 
-- Frete grátis para pedidos acima de R$ 500,00.
+- Frete grátis para pedidos a partir de R$ 500,00.
 - Para pedidos abaixo de R$ 500,00, taxa fixa de R$ 35,00.
 - Prazo de entrega: 1 a 3 dias úteis.
 - Entrega por motoboy próprio. O cliente é contactado por telefone antes da entrega.

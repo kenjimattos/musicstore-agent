@@ -395,7 +395,21 @@ musicstore-agent/
   - **Contatos:** telefone e e-mail aparecem em variantes divergentes no próprio manual. Entra só a variante coerente (telefone da capa e da seção 1.2; e-mail sem acento). A variante divergente não entra.
   - **Contradições resolvidas na curadoria, e não deixadas para o modelo** (detalhes na tabela "Conflitos entre o manual e a base", logo abaixo): itens 1 a 7.
   - **Ambiguidade resolvida na curadoria (regra 3.1):** o PDF diz "em até 3x: sem valor mínimo de parcela (exceto abaixo de R$ 50,00)". A leitura correta é que **compra abaixo de R$ 50,00 não parcela**, e não que exista um piso de R$ 50 por parcela. O `politicas.md` diz isso com todas as letras, porque o modelo lê o texto cru, e a tool `_installments` implementa a mesma regra. Um teste confere a redação, e o e2e `policy_small_purchase_installments` confere a resposta. Origem: o assistente leu o parêntese de outro jeito ao implementar o commit 8, e o candidato corrigiu.
-  - **O arquivo não inventa política:** só remove e resolve contradições. O teste do PDF garante que nenhum número novo entrou.
+  - **Revisão de ambiguidades do manual (decisões do candidato, aplicadas no `politicas.md`):**
+
+    | Item | Problema no PDF | Decisão |
+    |---|---|---|
+    | Troca por defeito (4.2) | "30 dias após a **compra**", enquanto 4.1 e 8.1 contam do recebimento | Conta do **recebimento**; a redação foi ajustada. `days_since_delivery` serve às duas janelas (7 e 30 dias) |
+    | 4.2 × 8.1 | Depois de 30 dias a 4.2 manda ao fabricante; a 8.1 dá 90 dias de garantia legal sem dizer de quem | O agente diz só o que está escrito (troca na loja até 30 dias; depois, garantia com o fabricante, a loja pode intermediar) e encaminha à equipe quem perguntar dos dias 31 a 90 |
+    | Resumo da seção 3 | "parcela mínima de R$ 100" contradizia a 3.1 | O resumo remete à 3.1; a 3.1 foi reescrita (abaixo de R$ 50 não parcela; 4x–6x: parcela ≥ R$ 80; 7x–12x: parcela ≥ R$ 100) |
+    | Limites exatos | "acima de R$ 500" e "abaixo de R$ 500" deixavam R$ 500,00 sem regra; idem R$ 2.000 | "**A partir de** R$ 500,00" tem frete grátis; "a partir de R$ 2.000,00" permite combinar formas de pagamento. Valor considerado: o do pedido já com promoção (suposição, README) |
+    | Troca por preferência (4.3) | "em até 7 dias", sem dizer de quê | **Após o recebimento**, como o arrependimento |
+    | Promoção e troca (4.4) | "venda final" podia ser lido como exclusão de qualquer troca, e a base tem a promoção "Liquidação de Inverno" sem marca de venda final | Nova seção 4.5, de autoria do candidato (CDC): a promoção não tira o direito a defeito nem ao arrependimento online; "venda final" só vale para troca por preferência; vale o valor efetivamente pago. O agente nunca nega troca pelo nome de uma promoção |
+
+    **Não incluído de propósito:** o encadeamento do CDC para defeito (30 dias para a loja consertar; depois, troca, devolução do valor ou abatimento) e a distinção de 30/90 dias entre bens duráveis e não duráveis. Isso criaria um segundo prazo de 30 dias ao lado da 4.2 e levaria o agente a prometer reembolso, que o manual não promete. Fica como decisão pendente do candidato.
+
+    **Regras de prompt que decorrem disso** (o agente não afirma sem fonte): não cita valor de frete fora de Campo Grande (calculado por CEP, sem tool); não diz que um produto específico exige "frete especial"; não informa prazo de garantia de fabricante de nenhuma marca; não promete reembolso nem diz quando o prazo de 10 dias úteis começa; não cita números de seção (a 7 saiu na curadoria); sobre horário, fala da loja física e não afirma que o atendimento parou fora do expediente nem se hoje é feriado. **Suposição para o README:** todo pedido da base é tratado como compra à distância, coerente com o canal WhatsApp.
+  - **O arquivo não inventa política:** só remove, resolve contradições e esclarece ambiguidades, com as decisões da tabela acima. O teste do PDF garante que nenhum número novo entrou.
 - **Conflitos entre o manual e a base (README, seção própria).** O manual e os dados entregues se contradizem em vários pontos. Parte deles parece **proposital, uma armadilha para ver se o agente repete o manual sem checar**. Todos ficam registrados, com a decisão de cada um:
 
   | # | Item | Manual | Base | Decisão |
