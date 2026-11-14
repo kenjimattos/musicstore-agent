@@ -4,7 +4,12 @@ Agente de atendimento da loja de instrumentos Empório da Música, pensado para 
 
 O agente responde sobre produtos, preços, estoque, pedidos e políticas da loja, consultando os CSVs (via SQLite) e uma versão curada do manual. Ele recusa o que está fora do escopo, resiste a manipulação e **não afirma nada sem fonte**: todo valor, código, data e prazo da resposta é conferido contra os resultados das ferramentas e as políticas antes de chegar ao cliente.
 
-- Conversas de exemplo, com o trace de cada resposta: [examples/](examples/)
+- Conversas de exemplo, com o trace de cada resposta ([examples/](examples/)):
+  1. [Descoberta](examples/1_descoberta.md): violão até R$ 1.000, consulta ao catálogo
+  2. [Preço e PIX](examples/2_preco_e_pix.md): Takamine GD20 e regra do PIX, com memória entre mensagens
+  3. [Arrependimento com pedido atrasado](examples/3_arrependimento_pedido_atrasado.md): **caso não trivial**, cruza o pedido do cliente (dados) com as regras de devolução (políticas)
+  4. [Sem estoque, cliente irritado](examples/4_sem_estoque_irritado.md): produto indisponível, alternativas e tom
+  5. [Guardrails](examples/5_guardrails.md): fora do escopo e manipulação
 - Plano de desenvolvimento, com todas as decisões e o histórico delas: [docs/plano.md](docs/plano.md)
 - Registro de mudanças, commit a commit: [CHANGELOG.md](CHANGELOG.md)
 
@@ -135,7 +140,7 @@ Uma linha por turno em `audit_log`: mensagem, decisão e tom do classificador, t
 ## Como atualizar políticas e dados
 
 - **Políticas:** editar `data/politicas.md`. Vale **na próxima mensagem**, sem reiniciar.
-  - O agente não lê o PDF, e isso tem um custo: um PDF novo da loja precisa de **curadoria** antes de valer (o que fica, o que sai, as contradições resolvidas, ver abaixo).
+  - O manual original da loja continua em `data/políticas_da_loja.pdf`, como entregue, e serve de referência para a curadoria e para o teste abaixo. O agente não o lê, e isso tem um custo: um PDF novo da loja precisa de **curadoria** antes de valer (o que fica, o que sai, as contradições resolvidas, ver abaixo).
   - Um teste confere que todo valor em R$, percentual, horário e prazo de `politicas.md` existe no PDF original. Isso pega erro de transcrição, mas não política desatualizada.
 - **Dados:** substituir os CSVs em `data/` pelo novo export e **reiniciar o app**. O ingest roda só no startup, para os dados não mudarem no meio de uma conversa.
   - Coluna faltando ou JSON inválido: erro claro no log, e o agente segue com os últimos dados válidos.
