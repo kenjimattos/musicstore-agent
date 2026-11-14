@@ -249,6 +249,8 @@ def _delivery(order: dict, now: date) -> dict:
         "delivery_region": region,
         "expected_by": expected_by.isoformat() if expected_by else None,
         "deadline_source": source,
+        # em texto, para o agente explicar de onde veio a data (o pedido não tem previsão) sem fazer conta
+        "policy_deadline": f"até {POLICY_DELIVERY_DAYS[region]} dias úteis" if source == "politica" else None,
         "awaiting_payment": order["status"] == "pending",
         "is_late": is_late,
         "days_late": (now - expected_by).days if is_late else 0,

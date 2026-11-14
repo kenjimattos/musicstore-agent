@@ -355,7 +355,7 @@ musicstore-agent/
      - `delivery_region`: `metropolitana` se a cidade do cliente está em `METRO_CITIES`, senão `outras_cidades`. O default de `METRO_CITIES` é `{"Campo Grande"}`, configurável. Das cidades da base (Campo Grande, Dourados, Três Lagoas, Corumbá, Ponta Porã), só Campo Grande é da região metropolitana;
      - `expected_by` e `deadline_source`, o prazo esperado e de onde ele veio:
        - **pedido com previsão de entrega** (enviado): a `estimated_delivery` do pedido, com fonte `pedido`. Pela regra de precedência, o dado da base vale sobre o prazo da política;
-       - **pedido confirmado, sem previsão** (aguardando envio): a data do pedido + o prazo da política para a região, em dias úteis, com fonte `politica`. Região metropolitana: até 3 dias úteis. Outras cidades: até 12 dias úteis, o maior prazo entre PAC, SEDEX e Jadlog, porque a base não registra a modalidade e é melhor não acusar atraso que não existe;
+       - **pedido confirmado, sem previsão** (aguardando envio): a data do pedido + o prazo da política para a região, em dias úteis, com fonte `politica`. Nesse caso a tool também devolve `policy_deadline` em texto ("até 3 dias úteis"), para o agente explicar de onde veio a data sem fazer conta, e o output_guard aceitar o prazo por vir da tool. Região metropolitana: até 3 dias úteis. Outras cidades: até 12 dias úteis, o maior prazo entre PAC, SEDEX e Jadlog, porque a base não registra a modalidade e é melhor não acusar atraso que não existe;
        - **pedido pendente:** sem prazo (`awaiting_payment = true`). O relógio de entrega só começa com o pagamento confirmado;
      - `is_late` e `days_late`: a data de hoje passou de `expected_by` e o pedido não foi entregue;
      - **Suposições para o README:**
