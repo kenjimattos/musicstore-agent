@@ -118,6 +118,15 @@ def test_frustrated_tone():
     assert (result.category, result.tone) == ("in_scope", "frustrated")
 
 
+@pytest.mark.parametrize("text", [
+    "isso é um absurdo, quero a troca amanhã",
+    "que palhaçada, preciso do meu pedido hoje!",
+])
+def test_irritation_beats_urgency(text):
+    # irritação + pressa: frustrated (o cliente precisa primeiro do reconhecimento do problema)
+    assert verdict(text).tone == "frustrated"
+
+
 def test_urgent_tone():
     result = verdict("Preciso de um violão URGENTE, tenho show hoje às 20h. Tem algum pronto pra hoje?")
     assert (result.category, result.tone) == ("in_scope", "urgent")
