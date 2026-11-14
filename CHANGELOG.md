@@ -10,6 +10,10 @@ listed in the order the changes were made (oldest first, new entries appended at
 each prefixed with its type (Added, Changed, Fixed, Removed, Docs, Test, Chore), so the
 sequence of decisions and corrections stays readable.
 
+## [Unreleased]
+
+01. **Docs:** README translated to English (content unchanged); it notes that the agent, the policies and the example conversations stay in Brazilian Portuguese.
+
 ## [0.1.1] - 2026-11-13
 
 01. **Docs:** README lists the five example conversations with a one-line summary each (marking the non-trivial one) and states that the original policies PDF stays in `data/` as the reference for `politicas.md`.

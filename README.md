@@ -1,271 +1,273 @@
-# Empório da Música: agente de atendimento
+# Empório da Música: customer service agent
 
-Agente de atendimento da loja de instrumentos Empório da Música, pensado para o **WhatsApp**. Feito em Python com o SDK oficial `anthropic` e um **loop de tool use explícito**, sem framework de agentes.
+Customer service agent for the Empório da Música instrument store, designed for **WhatsApp**. Built in Python with the official `anthropic` SDK and an **explicit tool use loop**, with no agent framework.
 
-O agente responde sobre produtos, preços, estoque, pedidos e políticas da loja, consultando os CSVs (via SQLite) e uma versão curada do manual. Ele recusa o que está fora do escopo, resiste a manipulação e **não afirma nada sem fonte**: todo valor, código, data e prazo da resposta é conferido contra os resultados das ferramentas e as políticas antes de chegar ao cliente.
+The agent answers questions about products, prices, stock, orders and store policies by querying the CSVs (through SQLite) and a curated version of the store manual. It declines out-of-scope requests, resists manipulation and **states nothing without a source**: every amount, code, date and deadline in a reply is checked against the tool results and the policies before it reaches the customer.
 
-- Conversas de exemplo, com o trace de cada resposta ([examples/](examples/)):
-  1. [Descoberta](examples/1_descoberta.md): violão até R$ 1.000, consulta ao catálogo
-  2. [Preço e PIX](examples/2_preco_e_pix.md): Takamine GD20 e regra do PIX, com memória entre mensagens
-  3. [Arrependimento com pedido atrasado](examples/3_arrependimento_pedido_atrasado.md): **caso não trivial**, cruza o pedido do cliente (dados) com as regras de devolução (políticas)
-  4. [Sem estoque, cliente irritado](examples/4_sem_estoque_irritado.md): produto indisponível, alternativas e tom
-  5. [Guardrails](examples/5_guardrails.md): fora do escopo e manipulação
-- Plano de desenvolvimento, com todas as decisões e o histórico delas: [docs/plano.md](docs/plano.md)
-- Registro de mudanças, commit a commit: [CHANGELOG.md](CHANGELOG.md)
+The agent talks to customers in Brazilian Portuguese, so the example conversations, the policies and the persona's replies are in Portuguese.
+
+- Example conversations, with the trace of each reply ([examples/](examples/)):
+  1. [Discovery](examples/1_descoberta.md): acoustic guitar up to R$ 1,000, catalog lookup
+  2. [Price and PIX](examples/2_preco_e_pix.md): Takamine GD20 and the PIX rule, with memory across messages
+  3. [Regret with a late order](examples/3_arrependimento_pedido_atrasado.md): **non-trivial case**, combines the customer's order (data) with the return rules (policies)
+  4. [Out of stock, frustrated customer](examples/4_sem_estoque_irritado.md): unavailable product, alternatives and tone
+  5. [Guardrails](examples/5_guardrails.md): out of scope and manipulation
+- Development plan, with every decision and its history (in Portuguese): [docs/plano.md](docs/plano.md)
+- Change log, commit by commit: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-## Como rodar
+## How to run
 
-Requisitos: [uv](https://docs.astral.sh/uv/) (instala o Python 3.11+ e as dependências) e uma chave da API da Anthropic.
+Requirements: [uv](https://docs.astral.sh/uv/) (installs Python 3.11+ and the dependencies) and an Anthropic API key.
 
 ```bash
-cp .env.example .env          # preencha ANTHROPIC_API_KEY
-uv run streamlit run app.py   # abre a simulação do WhatsApp no navegador
+cp .env.example .env          # fill in ANTHROPIC_API_KEY
+uv run streamlit run app.py   # opens the WhatsApp simulation in the browser
 ```
 
-Sem uv: `python -m venv .venv && source .venv/bin/activate && pip install -e . && streamlit run app.py`.
+Without uv: `python -m venv .venv && source .venv/bin/activate && pip install -e . && streamlit run app.py`.
 
-**Na UI:**
-- Na barra lateral, escolha **quem escreve**: um cliente da base ou "Visitante (número não cadastrado)". A UI passa ao agente só o telefone, como o WhatsApp faria.
-- O painel **"Dados do cliente (visão do avaliador)"** mostra os pedidos, chamados e pedidos de exclusão do cliente, direto do banco, para conferir as respostas. Ele não é enviado ao agente.
-- Cada resposta tem um expander **"Trace"** com a decisão do guard de entrada, as ferramentas chamadas (argumentos e resultado) e o veredito do guard de saída.
-- **Data simulada: 25/03/2026.** Os pedidos da base vão até 22/03/2026; com a data real, todo pedido pareceria meses atrasado e toda devolução estaria fora do prazo (ver "Suposições").
+**In the UI:**
+- In the sidebar, choose **who is writing**: a customer from the database or "Visitante (número não cadastrado)" (visitor, unregistered number). The UI passes only the phone number to the agent, as WhatsApp would.
+- The **"Dados do cliente (visão do avaliador)"** panel (customer data, evaluator view) shows the customer's orders, tickets and data deletion requests, straight from the database, so you can check the replies. It is not sent to the agent.
+- Each reply has a **"Trace"** expander with the input guard decision, the tools called (arguments and result) and the output guard verdict.
+- **Simulated date: 2026-03-25.** The orders in the database go up to 2026-03-22; with the real date, every order would look months late and every return would be out of time (see "Assumptions").
 
-**Sem UI (depuração):** `uv run python -m agent "quanto custa o Takamine GD20?" --phone "(67) 99654-7821"`
+**Without the UI (debugging):** `uv run python -m agent "quanto custa o Takamine GD20?" --phone "(67) 99654-7821"`
 
-### Testes
+### Tests
 
 ```bash
-uv run pytest                       # 336 testes, sem API e sem custo (dados, tools, guards, histórico, UI sem chat)
-uv run pytest -m llm                # classificador de entrada (31 casos), chama a API
-uv run pytest -m e2e                # 36 cenários de conversa ponta a ponta + chat da UI, chama a API
-scripts/e2e_baseline.sh 3           # e2e completo 3 vezes, com a taxa de acerto por cenário (~10 min)
-uv run python scripts/generate_examples.py   # regenera examples/ a partir dos cenários
+uv run pytest                       # 336 tests, no API and no cost (data, tools, guards, history, UI without chat)
+uv run pytest -m llm                # input classifier (31 cases), calls the API
+uv run pytest -m e2e                # 36 end-to-end conversation scenarios + UI chat, calls the API
+scripts/e2e_baseline.sh 3           # full e2e 3 times, with the pass rate per scenario (~10 min)
+uv run python scripts/generate_examples.py   # regenerates examples/ from the scenarios
 ```
 
-Os testes nunca escrevem em `data/`: ingestão e agente rodam sobre uma cópia temporária.
+Tests never write to `data/`: ingestion and the agent run on a temporary copy.
 
 ---
 
-## Arquitetura
+## Architecture
 
 ```
-respond(phone, text, thread_id)      # o mesmo par (telefone, texto) que um webhook do WhatsApp entrega
-  identify_customer(phone)  →  cliente | visitante              (SQL, sem LLM)
-  input_guard  ──barrada──→  resposta fixa ─────────────────────────────→ fim
-      │ ok (Haiku, saída estruturada: categoria + tom)
+respond(phone, text, thread_id)      # the same (phone, text) pair a WhatsApp webhook delivers
+  identify_customer(phone)  →  customer | visitor               (SQL, no LLM)
+  input_guard  ──blocked──→  fixed reply ───────────────────────────────→ end
+      │ ok (Haiku, structured output: category + tone)
       ▼
-  loop de tool use (Haiku + 6 tools, até 5 idas ao modelo)  ←── feedback (1 retry) ──┐
-      ▼                                                                             │
-  output_guard (determinístico, sem LLM) ── fato sem fonte ─────────────────────────┘
-      │ ok                       └── reprovou 2x → safe_fallback: abre chamado e responde com segurança
+  tool use loop (Haiku + 6 tools, up to 5 model calls)  ←── feedback (1 retry) ──┐
+      ▼                                                                          │
+  output_guard (deterministic, no LLM) ── unsourced fact ────────────────────────┘
+      │ ok                       └── failed twice → safe_fallback: opens a ticket and replies safely
       ▼
-  grava histórico (messages) + auditoria (audit_log) → resposta
+  stores history (messages) + audit (audit_log) → reply
 ```
 
-| Arquivo | O que faz |
+| File | What it does |
 |---|---|
-| `agent/agent.py` | `respond()` e o loop de tool use (`client.messages.create` enquanto `stop_reason == "tool_use"`), histórico, retry e fallback |
-| `agent/tools.py` | As 6 tools (funções Python + JSON Schemas + dispatch) e os cálculos: PIX, parcelas, prazos, atrasos |
-| `agent/guards.py` | `input_guard` (classificador) e `output_guard` (checagem de fatos) |
-| `agent/prompts.py` | Persona, regras de atendimento e montagem do system prompt (bloco fixo em cache + bloco dinâmico) |
-| `agent/db.py` | Todo o SQL (padrão de repositório); conexão de leitura para as tools e de escrita só para ingest, histórico e auditoria |
-| `agent/ingest.py` | Valida e importa os CSVs para o SQLite no startup |
-| `agent/policies.py` | Lê `data/politicas.md` (cache por mtime) |
-| `agent/audit.py` | Uma linha por turno no `audit_log` |
-| `app.py` | UI Streamlit que simula o WhatsApp |
+| `agent/agent.py` | `respond()` and the tool use loop (`client.messages.create` while `stop_reason == "tool_use"`), history, retry and fallback |
+| `agent/tools.py` | The 6 tools (Python functions + JSON Schemas + dispatch) and the calculations: PIX, installments, deadlines, delays |
+| `agent/guards.py` | `input_guard` (classifier) and `output_guard` (fact check) |
+| `agent/prompts.py` | Persona, service rules and system prompt assembly (cached fixed block + dynamic block) |
+| `agent/db.py` | All the SQL (repository pattern); a read connection for the tools and a write connection only for ingest, history and audit |
+| `agent/ingest.py` | Validates and imports the CSVs into SQLite at startup |
+| `agent/policies.py` | Reads `data/politicas.md` (cached by mtime) |
+| `agent/audit.py` | One row per turn in `audit_log` |
+| `app.py` | Streamlit UI that simulates WhatsApp |
 
-**Tools:** `search_products` (com filtro por especificações, ex.: cordas de nylon), `get_product_details` (com alternativas para sem estoque ou descontinuado), `list_categories`, `get_my_orders`, `escalate_to_team` (chamado para a equipe, simulado) e `request_data_deletion` (pedido de exclusão de dados, simulado).
+**Tools:** `search_products` (with a filter on specifications, e.g. nylon strings), `get_product_details` (with alternatives when out of stock or discontinued), `list_categories`, `get_my_orders`, `escalate_to_team` (ticket for the team, simulated) and `request_data_deletion` (data deletion request, simulated).
 
 ---
 
-## Decisões de produto
+## Product decisions
 
-- **O canal é o WhatsApp, e o canal define a identidade.** O cliente é identificado pelo **telefone que chega com a mensagem**, em código, nunca pelo que ele digita nem pelo modelo. Um número desconhecido é visitante: vê produtos e políticas livremente, e para consultar um pedido informa o número e o e-mail ou telefone do cadastro, que a tool confere com o dono.
-- **O canal define o estilo:** mensagens curtas, tom informal e educado, sem markdown pesado, emojis com moderação.
-- **Persona:** "Léo", atendente que é músico (roqueiro, mas fala de MPB com quem toca MPB). Na busca sem detalhes, ele pergunta que som a pessoa quer tirar antes de recomendar; se a pergunta é direta, responde direto. O tom muda com o cliente: com quem está irritado, sem brincadeira e reconhecendo o problema primeiro; com quem tem pressa, a informação principal na primeira frase.
-- **Para produção basta um endpoint:** o webhook da WhatsApp Business API recebe a mensagem e chama `respond(phone, text, thread_id)`. O agente não muda.
+- **The channel is WhatsApp, and the channel defines identity.** The customer is identified by the **phone number that arrives with the message**, in code, never by what they type or by the model. An unknown number is a visitor: they can browse products and policies freely, and to look up an order they give the order number and the email or phone on file, which the tool checks against the owner.
+- **The channel defines the style:** short messages, informal and polite tone, no heavy markdown, emojis in moderation.
+- **Persona:** "Léo", a clerk who is a musician (a rocker, but talks MPB with people who play MPB). On a search without details, he asks what sound the person is after before recommending; if the question is direct, he answers directly. The tone adapts to the customer: with someone frustrated, no jokes and the problem acknowledged first; with someone in a hurry, the key information in the first sentence.
+- **Production needs only an endpoint:** the WhatsApp Business API webhook receives the message and calls `respond(phone, text, thread_id)`. The agent does not change.
 
-## Decisões técnicas
+## Technical decisions
 
-| Decisão | Por quê |
+| Decision | Why |
 |---|---|
-| **SDK `anthropic` com loop explícito**, sem LangGraph ou similar | Seis tools e um fluxo linear (guard → agente → guard) cabem num loop de ~40 linhas. O código deixa visível exatamente o que vai para o modelo e o que volta |
-| **Haiku em tudo** (agente e classificador), configurável por env | O desenho tira do modelo o trabalho difícil: as tools devolvem preço no PIX, parcelas, prazos e dias de atraso já calculados, e o guard de saída confere os fatos. Ao modelo sobra escolher a tool e redigir |
-| **Guard de saída determinístico**, sem LLM juiz | Sem custo extra por turno e sem variação. No fluxo normal são 2 chamadas ao Haiku por mensagem (classificador + agente) |
-| **SQLite** com repositório em `db.py` | Zero infraestrutura para o avaliador. Todo o SQL fica num arquivo, com queries fixas e parametrizadas; migrar para Postgres é trocar o driver |
-| **Políticas curadas em `data/politicas.md`** no system prompt, com prompt caching | O manual inteiro (~3,5k tokens) cabe no contexto, mas mistura instruções internas e contradiz a base em vários pontos. O prompt tem um bloco fixo em cache (persona, regras, políticas) e um bloco dinâmico (primeiro nome do cliente, data e tom) |
-| **Sem RAG, embeddings ou banco vetorial** | Optei pela simplicidade: o volume de informação cabe com folga no contexto do modelo. As políticas curadas têm ~3,5k tokens e o catálogo tem 64 produtos. Um retriever só traria mais peças (índice, chunking, reranking) e um risco novo, o de recuperar o trecho errado, sem ganho a esse tamanho. Os dados que mudam (preço, estoque, pedidos) seguem em SQL via tools, porque precisam de valor exato e atual, e uma busca semântica aproximada não dá essa garantia. Se o manual ou o catálogo crescerem a ponto de pesar no contexto e no custo, o passo natural é recuperação sobre as políticas (por seção) e busca híbrida no catálogo |
-| **Histórico com janela de 10 turnos**, resultados de tools antigos omitidos | Evita poluição de contexto. Para repetir preço, estoque, status ou atraso, o agente consulta de novo, porque pode ter mudado |
-| **Sem `temperature`** | O modelo não aceita valores fora do padrão; o tom vem do prompt com exemplos |
-| **Identificar o cliente no início, carregar dados só quando ele pergunta** | Uma query de microssegundos dá o primeiro nome para o cumprimento. Pedidos só entram no contexto via `get_my_orders` |
+| **`anthropic` SDK with an explicit loop**, no LangGraph or similar | Six tools and a linear flow (guard → agent → guard) fit in a ~40-line loop. The code shows exactly what goes to the model and what comes back |
+| **Haiku everywhere** (agent and classifier), configurable through env | The design takes the hard work away from the model: the tools return the PIX price, installments, deadlines and days late already calculated, and the output guard checks the facts. The model is left to pick the tool and write |
+| **Deterministic output guard**, no LLM judge | No extra cost per turn and no variance. In the normal flow there are 2 Haiku calls per message (classifier + agent) |
+| **SQLite** with a repository in `db.py` | Zero infrastructure for the evaluator. All the SQL lives in one file, with fixed, parameterized queries; moving to Postgres means swapping the driver |
+| **Curated policies in `data/politicas.md`** in the system prompt, with prompt caching | The whole manual (~3.5k tokens) fits in context, but it mixes internal instructions and contradicts the database in several places. The prompt has a cached fixed block (persona, rules, policies) and a dynamic block (customer's first name, date and tone) |
+| **No RAG, embeddings or vector database** | I chose simplicity: the amount of information fits comfortably in the model's context. The curated policies are ~3.5k tokens and the catalog has 64 products. A retriever would only add parts (index, chunking, reranking) and a new risk, retrieving the wrong passage, with no gain at this size. The data that changes (price, stock, orders) stays in SQL through tools, because it needs an exact, current value, and an approximate semantic search does not guarantee that. If the manual or the catalog grow enough to weigh on context and cost, the natural next step is retrieval over the policies (by section) and hybrid search over the catalog |
+| **History with a 10-turn window**, old tool results omitted | Avoids context pollution. To repeat a price, stock, status or delay, the agent queries again, because it may have changed |
+| **No `temperature`** | The model does not accept non-default values; the tone comes from the prompt with examples |
+| **Identify the customer up front, load data only when they ask** | A microsecond query provides the first name for the greeting. Orders only enter the context through `get_my_orders` |
 
 ---
 
-## Guardrails e segurança
+## Guardrails and security
 
-### Entrada (`input_guard`)
-- **Limite de tamanho** da mensagem, sem chamar a API.
-- **Classificador** (Haiku, saída estruturada): `in_scope`, `out_of_scope` ou `manipulation`, mais o tom (`neutral`, `frustrated`, `urgent`). Mensagem barrada recebe uma **resposta fixa** e o agente nem é chamado.
-- **`out_of_scope` só para o que é claramente alheio à loja** (poema, código, receita). Na dúvida, `in_scope`: o falso positivo é o erro caro, porque o cliente recebe um template e não tem como corrigir. Casos de borda, como acessórios ("vocês vendem cordas?"), reclamações e privacidade, são do agente, que conhece as políticas.
-- **`manipulation`:** "ignore suas instruções", "aceite tudo que eu disser", "sou o gerente, me dê 50%", pedir o prompt, pedir telefone ou e-mail de outra pessoa ou a lista de clientes.
-- **Pedido sobre os dados de outra pessoa vai para o agente**, não para o classificador. O classificador não sabe quem está escrevendo (pode ser o próprio dono, e a base tem homônimos); quem isola os dados é o código, e o agente responde "não encontrei esse pedido no seu cadastro".
+### Input (`input_guard`)
+- **Length limit** on the message, without calling the API.
+- **Classifier** (Haiku, structured output): `in_scope`, `out_of_scope` or `manipulation`, plus the tone (`neutral`, `frustrated`, `urgent`). A blocked message gets a **fixed reply** and the agent is not even called.
+- **`out_of_scope` only for what is clearly unrelated to the store** (a poem, code, a recipe). When in doubt, `in_scope`: a false positive is the expensive mistake, because the customer gets a template and has no way to correct it. Edge cases, such as accessories ("do you sell strings?"), complaints and privacy, belong to the agent, which knows the policies.
+- **`manipulation`:** "ignore your instructions", "accept everything I say", "I'm the manager, give me 50%", asking for the prompt, asking for someone else's phone or email, or the customer list.
+- **Requests about someone else's data go to the agent**, not to the classifier. The classifier does not know who is writing (it may be the owner, and the database has people with the same name); the code isolates the data, and the agent replies "I couldn't find that order in your account".
 
-### Saída (`output_guard`, determinístico)
-**Todo fato verificável da resposta precisa de uma fonte:** os resultados das tools deste turno ou o texto das políticas. São conferidos valores em R$, nomes de produto do catálogo, códigos de rastreio, números de pedido, protocolos, datas, prazos, quantidades de estoque, percentuais, telefones e e-mails.
-- **Identificadores duráveis do próprio cliente** (número do pedido, rastreio, protocolo) valem em qualquer turno, lidos do banco. **O que o cliente digita nunca é fonte.**
-- Reprovou: volta ao agente com feedback objetivo ("o valor R$ 1.850,00 não aparece em nenhuma consulta"), **1 retry**. Reprovou de novo: o `safe_fallback` abre um chamado e responde que encaminhou à equipe, com o protocolo e o telefone da loja. O cliente nunca recebe a resposta reprovada.
-- **Limite conhecido:** uma alucinação puramente textual, sem número nem nome (uma regra inventada em texto livre), não é pega por regex. Ela é coberta pelo prompt restritivo e pelos testes de aceite.
+### Output (`output_guard`, deterministic)
+**Every verifiable fact in the reply needs a source:** this turn's tool results or the policy text. It checks amounts in R$, catalog product names, tracking codes, order numbers, ticket numbers, dates, deadlines, stock quantities, percentages, phone numbers and emails.
+- **The customer's own durable identifiers** (order number, tracking code, ticket number) are valid in any turn, read from the database. **What the customer types is never a source.**
+- On failure: back to the agent with objective feedback ("the amount R$ 1.850,00 does not appear in any lookup"), **1 retry**. If it fails again, `safe_fallback` opens a ticket and replies that the request was forwarded to the team, with the ticket number and the store's phone. The customer never receives the rejected reply.
+- **Known limit:** a purely textual hallucination, with no number or name (a rule made up in free text), is not caught by regex. It is covered by the restrictive prompt and the acceptance tests.
 
-### Dados e permissões (em código, não no prompt)
-- **O `customer_id` vem do canal e é injetado pelo dispatcher.** Ele não existe no JSON Schema das tools, e o dispatch recusa o argumento se o modelo tentar passá-lo. Nem um prompt injection bem-sucedido consulta o pedido de outra pessoa: o SQL filtra pelo dono, e pedido de outro cliente tem a mesma resposta de pedido inexistente.
-- **As tools de consulta usam uma conexão somente leitura.** SQL sempre parametrizado, argumentos validados, `LIKE` com coringas escapados. As únicas escritas que o agente alcança são `INSERT` em tabelas próprias (chamados, anotações, pedidos de exclusão).
-- **Dados mínimos:** do cadastro, o modelo vê só o primeiro nome; nenhuma tool devolve e-mail ou telefone de cliente.
+### Data and permissions (in code, not in the prompt)
+- **The `customer_id` comes from the channel and is injected by the dispatcher.** It does not exist in the tools' JSON Schema, and dispatch rejects the argument if the model tries to pass it. Not even a successful prompt injection can look up someone else's order: the SQL filters by owner, and another customer's order gets the same reply as a nonexistent one.
+- **The lookup tools use a read-only connection.** SQL is always parameterized, arguments are validated, `LIKE` wildcards are escaped. The only writes the agent can reach are `INSERT`s into the project's own tables (tickets, notes, deletion requests).
+- **Minimal data:** from the customer record, the model sees only the first name; no tool returns a customer's email or phone.
 
-### Exclusão de dados (LGPD), simulada
-O manual permite pedir a exclusão dos dados pelo WhatsApp. No protótipo, **o pedido é registrado com protocolo (`LGPD-…`) e nenhum dado é apagado**, e o painel do avaliador deixa isso explícito.
-- Só o **titular do número** pode pedir; o agente confirma antes de registrar. Visitante é orientado a pedir pelo número cadastrado ou por e-mail. E-mail digitado no chat não serve como prova, porque qualquer pessoa poderia pedir a exclusão dos dados de outra.
-- O agente não promete prazo nem que "tudo será apagado": o manual cita obrigações legais e fiscais que podem exigir manter alguns registros.
+### Data deletion (LGPD), simulated
+The manual allows requesting data deletion over WhatsApp. In the prototype, **the request is recorded with a ticket number (`LGPD-…`) and no data is deleted**, and the evaluator panel makes this explicit.
+- Only the **owner of the number** can request it; the agent confirms before recording. A visitor is told to request it from the registered number or by email. An email typed in the chat does not count as proof, because anyone could request deletion of someone else's data.
+- The agent promises neither a deadline nor that "everything will be deleted": the manual cites legal and tax obligations that may require keeping some records.
 
-### Encaminhamento para a equipe, simulado
-Atraso de pedido, reclamação, valor contestado e o fallback abrem um **chamado** (`ATD-…`) com retorno "em até 24 horas úteis" (prazo do manual). Ninguém é notificado; o chamado aparece no painel.
-- **Um chamado por pedido:** se o cliente volta a reclamar, a informação nova vira uma **anotação** no mesmo chamado. O agente só diz "registrei" quando a anotação foi de fato gravada.
-- **Chamado só para o que o agente não resolve.** Se a pergunta é sobre o código de rastreio, por exemplo, ele dá o código e oferece o chamado, sem abrir.
+### Escalation to the team, simulated
+An order delay, a complaint, a disputed amount and the fallback open a **ticket** (`ATD-…`) with a response "within 24 business hours" (the manual's deadline). Nobody is notified; the ticket shows up in the panel.
+- **One ticket per order:** if the customer complains again, the new information becomes a **note** on the same ticket. The agent only says "I've recorded it" when the note was actually stored.
+- **Tickets only for what the agent cannot solve.** If the question is about the tracking code, for example, it gives the code and offers a ticket, without opening one.
 
-### Auditoria
-Uma linha por turno em `audit_log`: mensagem, decisão e tom do classificador, tools chamadas (com argumentos), retries, o que o guard de saída reprovou, veredito, resposta e duração. Serve para revisar abuso e respostas ruins, e é a base para medir onde o agente falha.
-
----
-
-## Como atualizar políticas e dados
-
-- **Políticas:** editar `data/politicas.md`. Vale **na próxima mensagem**, sem reiniciar.
-  - O manual original da loja continua em `data/políticas_da_loja.pdf`, como entregue, e serve de referência para a curadoria e para o teste abaixo. O agente não o lê, e isso tem um custo: um PDF novo da loja precisa de **curadoria** antes de valer (o que fica, o que sai, as contradições resolvidas, ver abaixo).
-  - Um teste confere que todo valor em R$, percentual, horário e prazo de `politicas.md` existe no PDF original. Isso pega erro de transcrição, mas não política desatualizada.
-- **Dados:** substituir os CSVs em `data/` pelo novo export e **reiniciar o app**. O ingest roda só no startup, para os dados não mudarem no meio de uma conversa.
-  - Coluna faltando ou JSON inválido: erro claro no log, e o agente segue com os últimos dados válidos.
-  - Um CSV com data de modificação mais antiga que a da última importação é rejeitado, porque provavelmente é o arquivo errado.
-  - Histórico, auditoria, chamados e pedidos de exclusão nunca são apagados por uma nova importação.
-- **Testes de aceite ancorados nos dados entregues:** os cenários e2e citam preços, pedidos e clientes de `data/`. Se a loja mudar esses dados, os cenários correspondentes falham. É o aviso de que os exemplos ficaram desatualizados, não um bug do agente.
+### Audit
+One row per turn in `audit_log`: message, classifier decision and tone, tools called (with arguments), retries, what the output guard rejected, verdict, reply and duration. It serves to review abuse and bad replies, and is the basis for measuring where the agent fails.
 
 ---
 
-## Tratamento de dados e suposições
+## How to update policies and data
 
-### Precedência entre as fontes
-Os CSVs representam o **sistema da loja**; o manual descreve **regras e procedimentos**.
+- **Policies:** edit `data/politicas.md`. It takes effect **on the next message**, without restarting.
+  - The store's original manual remains in `data/políticas_da_loja.pdf`, as delivered, and serves as the reference for the curation and for the test below. The agent does not read it, and that has a cost: a new PDF from the store needs **curation** before it takes effect (what stays, what goes, contradictions resolved, see below).
+  - A test checks that every R$ amount, percentage, opening hour and deadline in `politicas.md` exists in the original PDF. This catches transcription errors, but not outdated policy.
+- **Data:** replace the CSVs in `data/` with the new export and **restart the app**. Ingest runs only at startup, so the data does not change mid-conversation.
+  - Missing column or invalid JSON: a clear error in the log, and the agent keeps the last valid data.
+  - A CSV with a modification date older than the last import is rejected, because it is probably the wrong file.
+  - History, audit, tickets and deletion requests are never deleted by a new import.
+- **Acceptance tests anchored in the delivered data:** the e2e scenarios cite prices, orders and customers from `data/`. If the store changes that data, the corresponding scenarios fail. That is a warning that the examples are outdated, not an agent bug.
 
-| Tipo de informação | Fonte que prevalece | Por quê |
+---
+
+## Data handling and assumptions
+
+### Precedence between sources
+The CSVs represent the **store's system**; the manual describes **rules and procedures**.
+
+| Type of information | Source that prevails | Why |
 |---|---|---|
-| Promoções, preços, estoque, status de produto e de pedido | **CSV** (via tools) | É o que o sistema registra hoje |
-| Devolução, garantia, frete, pagamento, horário, contatos | **Manual** (`politicas.md`) | A base não tem essas informações |
-| Conflito entre os dois sobre um dado | **CSV**, e o conflito fica registrado | O agente nunca repete do manual um dado que a base desmente |
+| Promotions, prices, stock, product and order status | **CSV** (through tools) | It is what the system records today |
+| Returns, warranty, shipping, payment, opening hours, contacts | **Manual** (`politicas.md`) | The database has none of this |
+| Conflict between the two about a data point | **CSV**, and the conflict is recorded | The agent never repeats from the manual a data point the database contradicts |
 
-**Princípio:** o manual vale para **compras novas**; o que está registrado na base vale como registro. O agente não recalcula nem "corrige" pedidos e encaminha à equipe quando o cliente contesta um valor.
+**Principle:** the manual applies to **new purchases**; what is recorded in the database stands as the record. The agent does not recalculate or "correct" orders, and escalates to the team when the customer disputes an amount.
 
-### Conflitos entre o manual e a base
-Alguns parecem armadilhas propositais para ver se o agente repete o manual sem checar.
+### Conflicts between the manual and the database
+Some look like deliberate traps to see whether the agent repeats the manual without checking.
 
-| # | Item | Manual | Base | Decisão |
+| # | Item | Manual | Database | Decision |
 |---|---|---|---|---|
-| 1 | Telefone | (67) 3341-4444 na capa e na 1.2; (67) 3321-4500 na seção 7 | n/a | Só 3341-4444 (2 de 3 ocorrências, e é o dos dados da empresa) |
-| 2 | E-mail | `emporiodamusica` na capa; `empóriodamusica` (domínio inválido) na 1.2 | n/a | Só `contato@emporiodamusica.com.br` |
-| 3 | Tamanho do catálogo | "mais de 300 instrumentos" | 64 produtos | A frase sai; o catálogo vem das tools |
-| 4 | Categorias | cita sopro e cordas orquestrais | as categorias existem, sem nenhum produto | O agente consulta `list_categories` e diz que não há itens no momento |
-| 5 | Campanhas | Aniversário, Black Friday, Volta às Aulas, Queima de Estoque, Semana do Músico | 4 campanhas fora do manual; Volta às Aulas não aparece | O calendário sai; vale a campanha que a tool devolve |
-| 6 | Faixas de desconto | Black Friday 15–30% "em todo o catálogo" | Black Friday de 10%, 25% e 30% em 3 produtos | As faixas saem; desconto só vem da tool |
-| 7 | Promoções ativas | calendário de campanhas | só 4 ativas, sem datas | Só `is_active=1` conta; o agente nunca promete campanha futura nem data de término |
-| 8 | Promoções repetidas | n/a | 3 produtos com 2 promoções inativas cada | Regra "maior desconto entre as ativas" |
-| 9 | 5% no PIX | sobre o preço de tabela | os 5 pedidos em PIX têm o preço cheio | O agente não diz que o cliente "teve 5%" e não recalcula |
-| 10 | Parcela mínima | R$ 80 (4–6x), R$ 100 (7–12x) | pedidos com parcelas abaixo disso | O pedido mostra o que foi registrado |
-| 11 | Frete de R$ 35 abaixo de R$ 500 | taxa fixa em Campo Grande | 5 pedidos sem frete no total | Idem |
-| 12 | Totais de pedido | n/a | 2 pedidos com total menor que a soma dos itens | Idem; contestação vai à equipe |
-| 13 | Descrição do produto 144 | n/a | o Roland Synth 3 Pro descreve um "teclado Yamaha" | Nome e preço vêm dos campos; o conflito fica registrado |
-| 14 | Entrega em Campo Grande | motoboy, 1 a 3 dias úteis | códigos dos Correios e previsão de 10 a 15 dias | Vale a previsão do pedido; o prazo da política só para pedido confirmado sem previsão. O agente não afirma o meio de entrega |
+| 1 | Phone | (67) 3341-4444 on the cover and in 1.2; (67) 3321-4500 in section 7 | n/a | Only 3341-4444 (2 of 3 occurrences, and it is the one in the company details) |
+| 2 | Email | `emporiodamusica` on the cover; `empóriodamusica` (invalid domain) in 1.2 | n/a | Only `contato@emporiodamusica.com.br` |
+| 3 | Catalog size | "more than 300 instruments" | 64 products | The sentence goes; the catalog comes from the tools |
+| 4 | Categories | mentions wind and orchestral strings | the categories exist, with no products | The agent queries `list_categories` and says there are no items at the moment |
+| 5 | Campaigns | Anniversary, Black Friday, Back to School, Stock Clearance, Musician's Week | 4 campaigns not in the manual; Back to School does not appear | The calendar goes; the campaign the tool returns is what counts |
+| 6 | Discount ranges | Black Friday 15–30% "across the whole catalog" | Black Friday of 10%, 25% and 30% on 3 products | The ranges go; discounts only come from the tool |
+| 7 | Active promotions | campaign calendar | only 4 active, with no dates | Only `is_active=1` counts; the agent never promises a future campaign or an end date |
+| 8 | Repeated promotions | n/a | 3 products with 2 inactive promotions each | Rule "largest discount among the active ones" |
+| 9 | 5% off with PIX | on the list price | the 5 PIX orders have the full price | The agent does not say the customer "got 5%" and does not recalculate |
+| 10 | Minimum installment | R$ 80 (4–6x), R$ 100 (7–12x) | orders with installments below that | The order shows what was recorded |
+| 11 | R$ 35 shipping below R$ 500 | flat fee in Campo Grande | 5 orders with no shipping in the total | Same |
+| 12 | Order totals | n/a | 2 orders with a total lower than the sum of the items | Same; disputes go to the team |
+| 13 | Description of product 144 | n/a | the Roland Synth 3 Pro describes a "Yamaha keyboard" | Name and price come from the fields; the conflict is recorded |
+| 14 | Delivery in Campo Grande | motorcycle courier, 1 to 3 business days | Correios (postal service) codes and an estimate of 10 to 15 days | The order's estimate counts; the policy deadline only for a confirmed order with no estimate. The agent does not state the delivery method |
 
-### Ambiguidades do manual, resolvidas na curadoria
-| Item | Problema | Decisão |
+### Manual ambiguities, resolved during curation
+| Item | Problem | Decision |
 |---|---|---|
-| Parcelamento (3.1) | "sem valor mínimo de parcela (exceto abaixo de R$ 50,00)" | Compra abaixo de R$ 50 não parcela (não é um piso por parcela) |
-| Troca por defeito (4.2) | conta da "compra", enquanto 4.1 e 8.1 contam do recebimento | Conta do recebimento |
-| 4.2 × garantia legal (8.1) | depois de 30 dias a 4.2 manda ao fabricante; a 8.1 dá 90 dias sem dizer de quem | Até 30 dias, a loja troca. Depois, na garantia, a loja atende a reclamação (o agente abre o chamado na hora) e a troca é feita pelo fabricante, sem prazo prometido |
-| Limites de valor | "acima de" e "abaixo de" R$ 500 deixavam R$ 500,00 sem regra | "A partir de" R$ 500 tem frete grátis |
-| Reembolso (4.1) | "10 dias úteis" sem dizer de quando | Só no arrependimento, contados da confirmação da loja. Em qualquer outro caso o agente não cita prazo e encaminha |
-| Promoção e troca (4.4) | "venda final" podia negar qualquer troca | Nova seção 4.5: a promoção não tira o direito a defeito nem ao arrependimento online |
+| Installments (3.1) | "no minimum installment amount (except below R$ 50.00)" | Purchases below R$ 50 cannot be split (it is not a per-installment floor) |
+| Defect exchange (4.2) | counts from the "purchase", while 4.1 and 8.1 count from receipt | Counts from receipt |
+| 4.2 × legal warranty (8.1) | after 30 days, 4.2 sends the customer to the manufacturer; 8.1 gives 90 days without saying by whom | Up to 30 days, the store exchanges. After that, under warranty, the store takes the complaint (the agent opens the ticket right away) and the exchange is done by the manufacturer, with no promised deadline |
+| Amount thresholds | "above" and "below" R$ 500 left R$ 500.00 with no rule | "From" R$ 500 up, shipping is free |
+| Refund (4.1) | "10 business days" without saying from when | Only for regret, counted from the store's confirmation. In any other case the agent cites no deadline and escalates |
+| Promotion and exchange (4.4) | "final sale" could deny any exchange | New section 4.5: a promotion does not remove the right to a defect claim or to online regret |
 
-### Outras suposições
-- **Data simulada:** `REFERENCE_DATE=2026-03-25` (logo após o último pedido), com o horário real de Campo Grande. Uma função só, `today()`, serve às tools, ao prompt, à UI e aos testes. No prompt, a data entra como fato, não como "simulação", para a persona não repetir a palavra.
-- **Prazos de entrega:** pedido enviado usa a previsão do próprio pedido. Pedido confirmado sem previsão usa a data do pedido mais o prazo da política (até 3 dias úteis na região metropolitana, até 12 nas outras cidades, o maior entre PAC, SEDEX e Jadlog, para não acusar atraso que não existe). Pedido pendente aguarda pagamento e não tem prazo.
-- **Recebimento:** a previsão de entrega serve como data de recebimento para as janelas de arrependimento (7 dias) e defeito (30 dias). Todo pedido é tratado como compra à distância, coerente com o canal.
-- **Disponibilidade:** ativo com estoque 0 é "sem estoque"; descontinuado não é vendido mesmo com estoque; "em breve" é anunciado sem data. O agente nunca promete reposição.
-- **Cadastros parecidos:** Bruno 11 e 43 têm o mesmo e-mail; Diego 13 e 47 têm nomes parecidos. Cada cadastro é um cliente distinto, e o agente **não unifica** por nome nem por e-mail: unificar errado vazaria pedidos de uma pessoa para outra. O telefone é único na base.
-- **Lojas parceiras:** o manual manda sugeri-las, mas não há lista; o agente não sugere nenhuma.
-
----
-
-## Qualidade medida
-
-- **336 testes determinísticos** (sem API): ingestão, tools (incluindo SQL injection e isolamento entre clientes), guard de saída, histórico, auditoria, painel da UI.
-- **31 casos do classificador de entrada** (`-m llm`): manipulação, fora do escopo, assuntos da loja que precisam passar, contexto de conversa, tom.
-- **36 cenários de conversa ponta a ponta** (`-m e2e`), escritos antes do agente, como critério de aceite. As asserções são sobre comportamento (tools chamadas, fatos que precisam e não podem aparecer, nenhum vazamento de dados), nunca sobre o texto exato.
-- **Linha de base** (`scripts/e2e_baseline.sh`): o e2e completo 3 vezes, com cada turno gravado. Como o modelo não é determinístico, uma rodada isolada não diz se um cenário passa sempre ou às vezes. Última medição completa: **34, 34 e 32 de 36**; os cenários que falhavam sempre foram corrigidos depois, e as falhas restantes são intermitentes (ver abaixo).
-- **Em nenhuma das falhas medidas o agente deu informação errada ou inventada.** O guard de saída barra fato sem fonte, e as falhas restantes são de completude ou estilo (por exemplo, deixar de citar o prazo da política que a tool devolveu).
+### Other assumptions
+- **Simulated date:** `REFERENCE_DATE=2026-03-25` (right after the last order), with the real Campo Grande time. A single function, `today()`, serves the tools, the prompt, the UI and the tests. In the prompt, the date is given as a fact, not as a "simulation", so the persona does not repeat the word.
+- **Delivery deadlines:** a shipped order uses its own estimate. A confirmed order with no estimate uses the order date plus the policy deadline (up to 3 business days in the metropolitan area, up to 12 in other cities, the longest among PAC, SEDEX and Jadlog, so as not to report a delay that does not exist). A pending order is awaiting payment and has no deadline.
+- **Receipt:** the delivery estimate serves as the receipt date for the regret (7 days) and defect (30 days) windows. Every order is treated as a distance purchase, consistent with the channel.
+- **Availability:** active with stock 0 is "out of stock"; discontinued is not sold even with stock; "coming soon" is announced without a date. The agent never promises restocking.
+- **Similar records:** Bruno 11 and 43 share the same email; Diego 13 and 47 have similar names. Each record is a distinct customer, and the agent **does not merge** by name or email: a wrong merge would leak one person's orders to another. The phone number is unique in the database.
+- **Partner stores:** the manual says to suggest them, but there is no list; the agent suggests none.
 
 ---
 
-## Limitações e próximos passos
+## Measured quality
 
-**Refinamentos que ficariam para mais tempo** (falhas intermitentes, cerca de 1 em 3 nos cenários afetados):
-- pedido confirmado fora do prazo às vezes não cita o prazo da política, embora a tool o devolva;
-- na descoberta, às vezes busca produtos antes de perguntar o estilo, ou não busca depois da resposta;
-- reembolso fora do arrependimento às vezes não abre o chamado;
-- no 2º turno de uma reclamação, às vezes repete os dias de atraso de memória; o guard barra e o retry consulta de novo, com uma ida a mais ao modelo;
-- quando o visitante informa o número do pedido, a resposta às vezes pede o número de novo (o guard reprovou o número digitado pelo cliente, e o retry o tirou).
-
-O caminho para fechá-los: rodar a linha de base a cada mudança de prompt (cada regra nova pode tirar peso de outra) e, só nas classes de pergunta que continuarem falhando, subir o `effort` ou usar um modelo maior, medindo pelo `audit_log`.
-
-**Para produção:**
-- **WhatsApp real:** um endpoint (FastAPI, por exemplo) recebe o webhook e chama `respond()`.
-- **Encaminhamento real:** o chamado iria para um helpdesk ou para a fila de atendimento humano, com notificação e acompanhamento do prazo de 24h úteis.
-- **Exclusão real (LGPD):** fila tratada pela equipe, com verificação de identidade, cobrindo também `messages` e `audit_log`, anonimizando pedidos com obrigação fiscal e apagando no sistema de origem (um novo export de CSV recriaria o cliente).
-- **Dados:** trocar o ingest de CSV pela integração com o sistema da loja (ERP ou e-commerce) ou por um sync agendado da planilha; Postgres no lugar do SQLite (mudança isolada em `db.py`).
-- **Data:** remover `REFERENCE_DATE` e usar a data real.
-- **Prazo de despacho:** o manual não define; com a data de confirmação do pagamento na base, o cálculo de atraso ficaria exato.
-- **Conversa sem expiração:** hoje o histórico é limitado a 10 turnos, sem corte por tempo. Quem volta dias depois carrega a conversa antiga; em produção, expirar a conversa por inatividade.
-- **Escala:** filtros em `get_my_orders` para clientes com histórico longo; observabilidade (tracing); autenticação de funcionários na UI.
+- **336 deterministic tests** (no API): ingestion, tools (including SQL injection and isolation between customers), output guard, history, audit, UI panel.
+- **31 input classifier cases** (`-m llm`): manipulation, out of scope, store topics that must pass, conversation context, tone.
+- **36 end-to-end conversation scenarios** (`-m e2e`), written before the agent, as acceptance criteria. The assertions are about behavior (tools called, facts that must and must not appear, no data leaks), never about the exact text.
+- **Baseline** (`scripts/e2e_baseline.sh`): the full e2e 3 times, with every turn recorded. Since the model is not deterministic, a single run does not tell whether a scenario always passes or only sometimes. Last full measurement: **34, 34 and 32 out of 36**; the scenarios that always failed were fixed afterwards, and the remaining failures are intermittent (see below).
+- **In none of the measured failures did the agent give wrong or made-up information.** The output guard blocks unsourced facts, and the remaining failures are about completeness or style (for example, not citing the policy deadline the tool returned).
 
 ---
 
-## Uso de assistente de IA
+## Limitations and next steps
 
-O projeto foi feito com o **Claude Code** como par de programação. O candidato definiu requisitos e restrições e tomou as decisões; o assistente propôs desenhos, levantou trade-offs, escreveu código e testes e apontou inconsistências nos dados.
+**Refinements left for more time** (intermittent failures, about 1 in 3 in the affected scenarios):
+- a confirmed order past its deadline sometimes does not cite the policy deadline, although the tool returns it;
+- in discovery, it sometimes searches products before asking about the style, or does not search after the answer;
+- a refund outside the regret window sometimes does not open the ticket;
+- on the 2nd turn of a complaint, it sometimes repeats the days late from memory; the guard blocks it and the retry queries again, with one extra model call;
+- when a visitor gives the order number, the reply sometimes asks for the number again (the guard rejected the number typed by the customer, and the retry removed it).
 
-**Como foi o fluxo:**
-- **Planejamento antes do código:** o plano ([docs/plano.md](docs/plano.md)) foi discutido em modo de plano, com o candidato questionando cada proposta.
-- **TDD:** os critérios de aceite (cenários e2e) foram escritos antes do agente, e cada parte determinística teve um commit `test:` (vermelho) antes do `feat:` ou `fix:` (verde). Ajustes de prompt viraram commits `fix(prompt):` próprios, para cada mudança de comportamento ser rastreável e reversível.
-- **Antes de cada passo**, o assistente descrevia o que ia fazer, e o candidato aprovava ou corrigia.
-- **Sessões novas de propósito** funcionaram como revisão com olhos frescos: uma delas expôs uma divergência entre o plano e um teste escrito em outra sessão.
+The way to close them: run the baseline on every prompt change (each new rule can take weight away from another) and, only for the question classes that keep failing, raise the `effort` or use a larger model, measuring through `audit_log`.
 
-**Iterações do desenho** (proposta inicial → questionamento → decisão):
+**For production:**
+- **Real WhatsApp:** an endpoint (FastAPI, for example) receives the webhook and calls `respond()`.
+- **Real escalation:** the ticket would go to a helpdesk or the human support queue, with notification and tracking of the 24-business-hour deadline.
+- **Real deletion (LGPD):** a queue handled by the team, with identity verification, also covering `messages` and `audit_log`, anonymizing orders with tax obligations and deleting in the source system (a new CSV export would recreate the customer).
+- **Data:** replace the CSV ingest with an integration with the store's system (ERP or e-commerce) or a scheduled sync of the spreadsheet; Postgres instead of SQLite (a change isolated in `db.py`).
+- **Date:** remove `REFERENCE_DATE` and use the real date.
+- **Dispatch deadline:** the manual does not define one; with the payment confirmation date in the database, the delay calculation would be exact.
+- **Conversation without expiry:** today the history is limited to 10 turns, with no time cutoff. Someone who comes back days later carries the old conversation; in production, expire the conversation after inactivity.
+- **Scale:** filters in `get_my_orders` for customers with a long history; observability (tracing); employee authentication in the UI.
 
-| Tema | Proposta inicial | Questionamento | Decisão final |
+---
+
+## AI assistant usage
+
+The project was built with **Claude Code** as a pair programmer. The candidate defined requirements and constraints and made the decisions; the assistant proposed designs, raised trade-offs, wrote code and tests and pointed out inconsistencies in the data.
+
+**How the workflow went:**
+- **Planning before code:** the plan ([docs/plano.md](docs/plano.md)) was discussed in plan mode, with the candidate questioning each proposal.
+- **TDD:** the acceptance criteria (e2e scenarios) were written before the agent, and each deterministic part had a `test:` commit (red) before the `feat:` or `fix:` (green). Prompt adjustments became their own `fix(prompt):` commits, so each behavior change is traceable and reversible.
+- **Before each step**, the assistant described what it was going to do, and the candidate approved or corrected it.
+- **Deliberately fresh sessions** worked as a review with fresh eyes: one of them exposed a mismatch between the plan and a test written in another session.
+
+**Design iterations** (initial proposal → questioning → decision):
+
+| Topic | Initial proposal | Questioning | Final decision |
 |---|---|---|---|
-| Orquestração | LangGraph | Abstração demais para 6 tools e um fluxo linear | Loop explícito com o SDK |
-| Guard de saída | Juiz LLM | Custo de uma chamada extra por turno | Checagem determinística, com as tools devolvendo os valores calculados |
-| Modelo | Sonnet no agente, Haiku no guard | Economia de tokens | Haiku em tudo, viável porque as tools fazem as contas e o guard confere |
-| Políticas | Manual inteiro, extraído do PDF | "Quero ver o tamanho"; ruído e contradições com a base | `politicas.md` curado, com teste contra o PDF |
-| Manual × base | Manual como fonte única | "O telefone errado pode ser uma pegadinha" | Cruzamento das fontes: 14 conflitos registrados e regra de precedência |
-| Identidade | Número do pedido + e-mail no chat | "Teremos login?" | Canal WhatsApp: cliente pelo telefone, em código |
-| Tools de pedido | Lista + detalhe em duas tools | Uma ida extra ao modelo no caso mais comum | Uma tool, com ranking em SQL |
-| Fontes do guard entre turnos | Só resultados do turno atual | O guard reprovava o protocolo e o pedido que o próprio agente tinha dado | Identificadores duráveis do cliente valem sempre; o que o cliente digita nunca é fonte |
-| Dados de terceiros | Barrar no classificador | "O input guard já tem os dados do cliente?" Não tem: ele não sabe quem escreve | Vão para o agente; o código isola os dados; os testes verificam o efeito |
-| Reclamação repetida | Reaproveitar o chamado e descartar o resumo novo | O agente dizia "registrei" sem ter gravado nada | A informação nova vira anotação no mesmo chamado |
-| Validação do prompt | Rodar 1 ou 2 cenários depois de cada ajuste | "A cada iteração você corrige uma coisa e outras aparecem" | Linha de base com o e2e completo 3 vezes e taxa de acerto por cenário |
+| Orchestration | LangGraph | Too much abstraction for 6 tools and a linear flow | Explicit loop with the SDK |
+| Output guard | LLM judge | Cost of an extra call per turn | Deterministic check, with the tools returning the calculated values |
+| Model | Sonnet for the agent, Haiku for the guard | Token savings | Haiku everywhere, viable because the tools do the math and the guard checks |
+| Policies | Whole manual, extracted from the PDF | "I want to see the size"; noise and contradictions with the database | Curated `politicas.md`, with a test against the PDF |
+| Manual × database | Manual as the single source | "The wrong phone number might be a trick" | Cross-checking the sources: 14 conflicts recorded and a precedence rule |
+| Identity | Order number + email in the chat | "Will we have login?" | WhatsApp channel: customer by phone number, in code |
+| Order tools | List + detail in two tools | An extra model call in the most common case | One tool, with ranking in SQL |
+| Guard sources across turns | Only the current turn's results | The guard rejected the ticket number and order the agent itself had given | The customer's durable identifiers always count; what the customer types is never a source |
+| Third-party data | Block in the classifier | "Does the input guard already have the customer's data?" It does not: it does not know who is writing | They go to the agent; the code isolates the data; the tests check the effect |
+| Repeated complaint | Reuse the ticket and discard the new summary | The agent said "I've recorded it" without storing anything | The new information becomes a note on the same ticket |
+| Prompt validation | Run 1 or 2 scenarios after each adjustment | "Every iteration you fix one thing and others show up" | Baseline with the full e2e 3 times and a pass rate per scenario |
 
-**Erros do assistente, corrigidos pelo candidato** (entre outros):
-- seguiu um teste como se fosse a especificação, sem notar que contradizia o plano;
-- leu a regra de parcelamento do manual de outro jeito ao implementar (piso de R$ 50 por parcela, em vez de "compra abaixo de R$ 50 não parcela");
-- propôs aceitar como fonte do guard o número de pedido digitado pelo cliente; o candidato vetou, porque o guard confere o que o modelo afirma, não o que o usuário escreve;
-- validou ajustes de prompt com uma ou duas rodadas de poucos cenários, e isso escondeu efeitos colaterais: uma regra nova sobre arrependimento fez as respostas de entrega perderem o prazo e o rastreio, o que só apareceu na linha de base completa;
-- uma correção (reaproveitar o chamado aberto) criou um problema novo (o resumo do segundo contato era descartado, e o agente dizia que tinha registrado), que o candidato pediu para resolver anotando no mesmo chamado.
+**Assistant mistakes, corrected by the candidate** (among others):
+- followed a test as if it were the specification, without noticing it contradicted the plan;
+- read the manual's installment rule differently when implementing (an R$ 50 floor per installment, instead of "purchases below R$ 50 cannot be split");
+- proposed accepting the order number typed by the customer as a guard source; the candidate vetoed it, because the guard checks what the model claims, not what the user writes;
+- validated prompt adjustments with one or two runs of a few scenarios, which hid side effects: a new rule about regret made delivery replies lose the deadline and the tracking code, which only showed up in the full baseline;
+- a fix (reusing the open ticket) created a new problem (the summary from the second contact was discarded, and the agent said it had recorded it), which the candidate asked to solve by adding a note to the same ticket.
