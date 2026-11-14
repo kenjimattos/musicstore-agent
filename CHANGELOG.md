@@ -12,6 +12,8 @@ sequence of decisions and corrections stays readable.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-13
+
 1. **Chore:** project scaffold.
 2. **Test:** acceptance scenarios (e2e).
 3. **Test:** ingest and validation.
@@ -94,3 +96,4 @@ sequence of decisions and corrections stays readable.
 79. **Docs:** README with how to run (UI, CLI, tests, baseline, examples), architecture, product and technical decisions, guardrails and security (LGPD and escalation simulations, audit), how to update policies and data, source precedence, the 14 manual-vs-data conflicts and the manual ambiguities, assumptions, measured quality, limitations and refinements, and AI assistant usage (workflow, design iterations, assistant mistakes). `.env.example` now sets `REFERENCE_DATE=2026-03-25`, so the CLI and scripts use the exercise dates like the UI.
 80. **Test:** startup on a database created by an earlier version creates the missing own tables (`messages`, `audit_log`, `ticket_notes`…) without reimporting or deleting anything, also when a CSV is rejected. Red until the fix lands (running the app on an existing `data/store.db` failed with "no such table: ticket_notes").
 81. **Fixed:** startup creates the own tables missing from a database made by an earlier version (`db.create_own_tables`, idempotent), even when no CSV changed or a CSV is rejected, so the app no longer fails with "no such table: ticket_notes" on an existing `data/store.db`.
+82. **Chore:** release 0.1.0: agent with tool use, input and output guards, simulated escalation and data deletion, audit log, Streamlit UI simulating WhatsApp, example conversations and README.
