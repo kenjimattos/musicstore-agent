@@ -79,3 +79,4 @@ sequence of decisions and corrections stays readable.
 64. **Fixed:** defect after 30 days: the agent opens the ticket in the first message (without asking for the order first), says the exchange is done by the manufacturer and that its deadline depends on the manufacturer, and asks for the order number and a description to complete the ticket. The e2e report lists only scenarios that ran.
 65. **Fixed:** with a ticket already open, when the customer insists, complains again or brings new information, the agent calls `escalate_to_team` again so it is recorded as a note on the same ticket.
 66. **Test:** input guard tone: irritation together with urgency ("isso é um absurdo, quero a troca amanhã") is `frustrated`. Red under `-m llm` until the guard prompt changes.
+67. **Fixed:** input guard tone: when a message has both irritation and urgency, the tone is `frustrated` (the customer first needs the problem acknowledged).

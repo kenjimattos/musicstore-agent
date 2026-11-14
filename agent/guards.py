@@ -50,6 +50,7 @@ tone (só da última mensagem):
 - frustrated: irritação, reclamação, repetição ("já é a terceira vez").
 - urgent: pressa ou prazo próximo ("urgente", "hoje à noite", "preciso agora").
 - neutral: o resto.
+Se houver irritação e pressa na mesma mensagem ("isso é um absurdo, quero amanhã"), o tom é frustrated: a irritação vem primeiro.
 
 reason: uma frase curta, em português.
 
