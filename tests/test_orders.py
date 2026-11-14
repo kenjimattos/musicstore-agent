@@ -28,6 +28,7 @@ Interface esperada (commit 10). Em todas as tools, erro de validação ou de ace
         "days_since_delivery": int | None,  # só pedido entregue (estimated_delivery como proxy)
         "delivery_region": "metropolitana" | "outras_cidades",   # METRO_CITIES (default: Campo Grande)
         "expected_by": "YYYY-MM-DD" | None, "deadline_source": "pedido" | "politica" | None,
+        "policy_deadline": "até 3 dias úteis" | None,  # só com fonte "politica": o prazo da região, em texto
         "awaiting_payment": bool,           # pedido pendente: o relógio de entrega ainda não começou
         "is_late": bool, "days_late": int,
     }
@@ -429,6 +430,7 @@ def test_shipped_order_uses_the_deadline_of_the_order(ready):
     order = detail(ANA, 8)  # enviado, previsão 28/02
     assert order["expected_by"] == "2026-02-28"
     assert order["deadline_source"] == "pedido"
+    assert order["policy_deadline"] is None  # a previsão do pedido vale; não há prazo de política a citar
     assert order["delivery_region"] == "metropolitana"
     assert order["is_late"] is True
     assert order["days_late"] == 25
@@ -451,6 +453,8 @@ def test_confirmed_orders_use_the_policy_deadline_counted_from_the_order_date(
     assert order["estimated_delivery"] is None
     assert order["expected_by"] == expected_by
     assert order["deadline_source"] == "politica"
+    # o prazo da região vai em texto, para o agente explicar de onde veio a data sem fazer conta
+    assert order["policy_deadline"] == {"metropolitana": "até 3 dias úteis", "outras_cidades": "até 12 dias úteis"}[region]
     assert order["delivery_region"] == region
     assert order["is_late"] is True
     assert order["days_late"] == days_late
@@ -464,6 +468,7 @@ def test_pending_orders_are_awaiting_payment_and_have_no_deadline(ready, custome
     assert order["awaiting_payment"] is True
     assert order["expected_by"] is None
     assert order["deadline_source"] is None
+    assert order["policy_deadline"] is None
     assert order["is_late"] is False
     assert order["days_late"] == 0
 

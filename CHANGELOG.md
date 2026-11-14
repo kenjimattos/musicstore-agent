@@ -81,3 +81,4 @@ sequence of decisions and corrections stays readable.
 66. **Test:** input guard tone: irritation together with urgency ("isso é um absurdo, quero a troca amanhã") is `frustrated`. Red under `-m llm` until the guard prompt changes.
 67. **Fixed:** input guard tone: when a message has both irritation and urgency, the tone is `frustrated` (the customer first needs the problem acknowledged).
 68. **Fixed:** the agent queries again before repeating days late, deadlines or dates (not only price, stock and status), and knows it may repeat the order number, tracking code and protocol without a query, matching the output guard sources.
+69. **Test:** `get_my_orders` returns `policy_deadline` ("até 3 dias úteis" in the metro region, "até 12 dias úteis" elsewhere) when the expected date comes from the policy, and `None` when the order has its own estimate or is pending. Red until the implementation lands.
