@@ -80,3 +80,4 @@ sequence of decisions and corrections stays readable.
 65. **Fixed:** with a ticket already open, when the customer insists, complains again or brings new information, the agent calls `escalate_to_team` again so it is recorded as a note on the same ticket.
 66. **Test:** input guard tone: irritation together with urgency ("isso é um absurdo, quero a troca amanhã") is `frustrated`. Red under `-m llm` until the guard prompt changes.
 67. **Fixed:** input guard tone: when a message has both irritation and urgency, the tone is `frustrated` (the customer first needs the problem acknowledged).
+68. **Fixed:** the agent queries again before repeating days late, deadlines or dates (not only price, stock and status), and knows it may repeat the order number, tracking code and protocol without a query, matching the output guard sources.
