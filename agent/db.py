@@ -427,6 +427,22 @@ def create_audit_table(conn) -> None:
     conn.execute(_AUDIT_INDEX)
 
 
+def create_own_tables() -> None:
+    """Cria as tabelas fora dos CSVs que faltarem (histórico, auditoria, chamados, exclusões).
+
+    Idempotente (CREATE ... IF NOT EXISTS): serve de migração para um banco criado por uma versão
+    anterior, sem reimportar nem apagar nada.
+    """
+    conn = connect_rw()
+    try:
+        create_request_tables(conn)
+        create_audit_table(conn)
+        create_messages_table(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def insert_audit(row: dict) -> None:
     conn = connect_rw()
     try:

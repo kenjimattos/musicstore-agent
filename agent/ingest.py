@@ -321,7 +321,8 @@ def ensure_fresh() -> bool:
 def startup() -> bool:
     """Chamada no startup do app. CSV rejeitado vai para o log e o agente segue com os dados anteriores.
 
-    Sem importação anterior não há o que servir, e o erro sobe.
+    Sem importação anterior não há o que servir, e o erro sobe. Com banco existente, as tabelas próprias
+    que faltarem são criadas, mesmo sem reimportar (banco de uma versão anterior).
     """
     try:
         return ensure_fresh()
@@ -330,3 +331,6 @@ def startup() -> bool:
             raise
         log.error("CSV rejeitado, mantendo os dados anteriores: %s", exc)
         return False
+    finally:
+        if db.db_path().exists():
+            db.create_own_tables()
