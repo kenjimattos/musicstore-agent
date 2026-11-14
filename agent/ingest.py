@@ -252,6 +252,7 @@ def _write(
     conn.executemany("INSERT INTO product_specs (product_id, key, value) VALUES (?, ?, ?)", specs)
     conn.execute("CREATE INDEX product_specs_key_value ON product_specs (key, value)")
     db.create_request_tables(conn)  # data_requests e support_tickets: criadas se faltarem, nunca recriadas
+    db.create_audit_table(conn)  # idem para o audit_log
     conn.execute("DROP TABLE IF EXISTS ingest_meta")
     conn.execute("CREATE TABLE ingest_meta (table_name TEXT PRIMARY KEY, mtime_ns INTEGER NOT NULL)")
     conn.executemany(

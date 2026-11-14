@@ -278,6 +278,10 @@ A tabela `audit_log` no mesmo banco registra uma linha por turno com:
 
 Serve para revisar abuso (de clientes ou funcionários) e respostas ruins.
 
+- **Implementação:** `agent/audit.py` monta a linha; o SQL fica em `db.py`. `respond()` grava uma linha por turno em qualquer caminho (barrado, aprovado, fallback), com `customer_id` (vazio para visitante), motivo do guard, retries, violações do output_guard e duração em ms.
+- **Tools com argumentos, sem os resultados:** os resultados já estão em `messages`; o log não duplica dados da base.
+- Fica fora das 6 tabelas dos CSVs, então um novo ingest não apaga. O e2e confere uma linha por turno em todo cenário.
+
 ## Atualização fácil de políticas e dados
 A loja substitui arquivos em `data/`, sem mexer em código. As políticas valem na próxima mensagem; os CSVs valem na próxima inicialização do app.
 - **Políticas:**

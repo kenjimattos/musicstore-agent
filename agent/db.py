@@ -380,6 +380,52 @@ def save_message(thread_id: str, role: str, content, created_at: str | None = No
         conn.close()
 
 
+# ---------- auditoria ----------
+# Uma linha por turno (ver `agent.audit`). Fora das 6 tabelas dos CSVs: um novo ingest nunca a apaga.
+
+_AUDIT_TABLE = (
+    "CREATE TABLE IF NOT EXISTS audit_log ("
+    "audit_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, thread_id TEXT NOT NULL, "
+    "customer_id INTEGER, message TEXT NOT NULL, guard_category TEXT, guard_tone TEXT, guard_reason TEXT, "
+    "blocked INTEGER NOT NULL, tools TEXT NOT NULL, iterations INTEGER NOT NULL, retries INTEGER NOT NULL, "
+    "violations TEXT NOT NULL, output_verdict TEXT, reply TEXT NOT NULL, duration_ms INTEGER)"
+)
+_AUDIT_INDEX = "CREATE INDEX IF NOT EXISTS idx_audit_thread ON audit_log (thread_id, audit_id)"
+_AUDIT_COLUMNS = ("created_at", "thread_id", "customer_id", "message", "guard_category", "guard_tone",
+                  "guard_reason", "blocked", "tools", "iterations", "retries", "violations", "output_verdict",
+                  "reply", "duration_ms")
+
+
+def create_audit_table(conn) -> None:
+    conn.execute(_AUDIT_TABLE)
+    conn.execute(_AUDIT_INDEX)
+
+
+def insert_audit(row: dict) -> None:
+    conn = connect_rw()
+    try:
+        create_audit_table(conn)
+        conn.execute(
+            f"INSERT INTO audit_log ({', '.join(_AUDIT_COLUMNS)}) VALUES ({', '.join(':' + c for c in _AUDIT_COLUMNS)})",
+            {c: row.get(c) for c in _AUDIT_COLUMNS},
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_audit(thread_id: str | None = None) -> list[dict]:
+    """Linhas do audit_log na ordem gravada; de uma conversa, ou todas."""
+    conn = connect_rw()
+    try:
+        create_audit_table(conn)
+        conn.row_factory = sqlite3.Row
+        sql = "SELECT * FROM audit_log" + (" WHERE thread_id = :thread_id" if thread_id else "") + " ORDER BY audit_id"
+        return [dict(r) for r in conn.execute(sql, {"thread_id": thread_id})]
+    finally:
+        conn.close()
+
+
 def load_messages(thread_id: str) -> list[dict]:
     """Mensagens da thread na ordem em que foram gravadas."""
     conn = connect_rw()

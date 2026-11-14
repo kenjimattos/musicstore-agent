@@ -9,13 +9,14 @@ O input_guard (classificador Haiku) roda antes do agente: mensagem barrada receb
 import json
 import os
 import threading
+import time
 from contextlib import closing
 from dataclasses import dataclass, field
 
 import anthropic
 from dotenv import load_dotenv
 
-from agent import db, guards, ingest, policies, prompts, tools
+from agent import audit, db, guards, ingest, policies, prompts, tools
 
 load_dotenv()
 
@@ -198,9 +199,19 @@ def safe_fallback(summary: str, *, customer_id, phone, thread_id) -> str:
 
 
 def respond(phone: str, text: str, thread_id: str) -> Reply:
+    """Um turno: guard de entrada, agente, guard de saída. Cada turno vira uma linha no audit_log."""
     _ensure_database()
-    trace = Trace()
+    started = time.monotonic()
     customer = tools.identify_customer(phone)
+    customer_id = customer["customer_id"] if customer else None
+    reply = _respond(phone, text, thread_id, customer)
+    audit.log_turn(thread_id=thread_id, customer_id=customer_id, message=text, reply=reply.text, trace=reply.trace,
+                   duration_ms=int((time.monotonic() - started) * 1000))
+    return reply
+
+
+def _respond(phone: str, text: str, thread_id: str, customer: dict | None) -> Reply:
+    trace = Trace()
     customer_id = customer["customer_id"] if customer else None
     verdict = guards.input_guard(text, build_history(thread_id))
     trace.guard_category, trace.guard_tone, trace.guard_reason = verdict.category, verdict.tone, verdict.reason

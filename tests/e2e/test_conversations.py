@@ -146,3 +146,8 @@ def test_scenario(scenario, e2e_store):
             raise
         record_turn(scenario.id, i, turn.text, reply, None)
 
+    from agent import db
+
+    logged = db.load_audit(thread_id)  # auditoria: uma linha por turno, barrado ou não
+    assert [r["message"] for r in logged] == [t.text for t in scenario.turns]
+
