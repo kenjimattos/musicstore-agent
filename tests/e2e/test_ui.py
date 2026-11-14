@@ -45,7 +45,7 @@ def orders_in_panel(at) -> list[int]:
 def test_app_starts_with_the_visitor_and_the_simulated_date(app):
     assert app.sidebar.selectbox[0].value is None  # visitante
     assert any("25/03/2026" in m.value for m in app.info), "aviso da data simulada no topo"
-    assert any("pedido 14" in m.value for m in app.sidebar.caption + app.sidebar.info), "dica de teste do visitante"
+    assert any("pedido 14" in m.value for m in [*app.sidebar.caption, *app.sidebar.info]), "dica de teste do visitante"
 
 
 def test_selector_lists_customers_by_name_and_city(app):
@@ -65,7 +65,7 @@ def test_panel_shows_only_the_selected_customers_orders(app):
 
 def test_panel_says_it_is_not_sent_to_the_model(app):
     select(app, ANA)
-    text = " ".join(m.value for m in app.sidebar.caption + app.sidebar.markdown)
+    text = " ".join(m.value for m in [*app.sidebar.caption, *app.sidebar.markdown])
     assert "não é enviado ao agente" in text
 
 

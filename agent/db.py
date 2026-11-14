@@ -225,6 +225,32 @@ def get_order_items(conn, order_id: int) -> list[dict]:
     ))
 
 
+# ---------- painel do avaliador (só a UI usa; não é tool, o agente não alcança) ----------
+
+
+def list_customers(conn) -> list[dict]:
+    return _rows(conn.execute("SELECT customer_id, name, phone, email, city FROM customers ORDER BY name, customer_id"))
+
+
+def customer_orders(conn, customer_id: int) -> list[dict]:
+    return _rows(conn.execute(_ORDER_SELECT + " WHERE o.customer_id = :c ORDER BY o.order_date DESC, o.order_id DESC",
+                              {"c": customer_id}))
+
+
+def customer_data_requests(conn, customer_id: int) -> list[dict]:
+    return _rows(conn.execute("SELECT request_id, requested_at, status FROM data_requests "
+                              "WHERE customer_id = :c ORDER BY request_id", {"c": customer_id}))
+
+
+def customer_tickets(conn, customer_id: int | None, phone: str | None) -> list[dict]:
+    """Chamados do cliente (ou do telefone do visitante), com o número de anotações."""
+    where = "t.customer_id = :c" if customer_id is not None else "t.customer_id IS NULL AND t.phone = :p"
+    return _rows(conn.execute(
+        "SELECT t.ticket_id, t.reason, t.order_id, t.summary, t.created_at, t.status, "
+        "(SELECT COUNT(*) FROM ticket_notes n WHERE n.ticket_id = t.ticket_id) AS notes "
+        f"FROM support_tickets t WHERE {where} ORDER BY t.ticket_id", {"c": customer_id, "p": phone}))
+
+
 # ---------- escritas restritas (simulação de exclusão de dados e encaminhamento) ----------
 # Únicas escritas que o agente alcança, e só `INSERT` em tabelas próprias: nenhuma altera
 # customers, orders, order_items, products nem promotions. Ficam fora das 6 tabelas dos CSVs,
