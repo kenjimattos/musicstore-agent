@@ -10,7 +10,11 @@ listed in the order the changes were made (oldest first, new entries appended at
 each prefixed with its type (Added, Changed, Fixed, Removed, Docs, Test, Chore), so the
 sequence of decisions and corrections stays readable.
 
-## [Unreleased]
+## [0.1.1] - 2026-11-13
+
+01. **Docs:** README lists the five example conversations with a one-line summary each (marking the non-trivial one) and states that the original policies PDF stays in `data/` as the reference for `politicas.md`.
+02. **Docs:** README justifies not using RAG, embeddings or a vector store: policies (~3.5k tokens) and catalog (64 products) fit in the model context, exact and current data stays in SQL tools, and it states when retrieval would become worth adding.
+03. **Chore:** release 0.1.1: version bumped in `pyproject.toml` and `uv.lock`, README clarifications (example conversations, original policies PDF, why retrieval stays simple).
 
 ## [0.1.0] - 2026-11-13
 
@@ -97,5 +101,3 @@ sequence of decisions and corrections stays readable.
 80. **Test:** startup on a database created by an earlier version creates the missing own tables (`messages`, `audit_log`, `ticket_notes`…) without reimporting or deleting anything, also when a CSV is rejected. Red until the fix lands (running the app on an existing `data/store.db` failed with "no such table: ticket_notes").
 81. **Fixed:** startup creates the own tables missing from a database made by an earlier version (`db.create_own_tables`, idempotent), even when no CSV changed or a CSV is rejected, so the app no longer fails with "no such table: ticket_notes" on an existing `data/store.db`.
 82. **Chore:** release 0.1.0: agent with tool use, input and output guards, simulated escalation and data deletion, audit log, Streamlit UI simulating WhatsApp, example conversations and README.
-83. **Docs:** README lists the five example conversations with a one-line summary each (marking the non-trivial one) and states that the original policies PDF stays in `data/` as the reference for `politicas.md`.
-84. **Docs:** README justifies not using RAG, embeddings or a vector store: policies (~3.5k tokens) and catalog (64 products) fit in the model context, exact and current data stays in SQL tools, and it states when retrieval would become worth adding.
