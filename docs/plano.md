@@ -508,7 +508,7 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
 2. "Quanto custa o Takamine GD20?" e depois "e no PIX?" (multi-turn + regra do PIX).
 3. A cliente Ana (identificada pelo número) escreve "me arrependi da compra, posso devolver?". O agente chama `get_my_orders()` e recebe o pedido 8 em detalhe.
    - Pelos dados, o pedido está `shipped`, com previsão de entrega em 28/02. Em relação à `REFERENCE_DATE`, `is_late=true`: ele ainda não chegou e está atrasado.
-   - O agente precisa combinar dados e política: o direito de arrependimento conta a partir do recebimento (seção 4.1); reconhecer o atraso e encaminhar à equipe. O código de rastreio não é exigido aqui, porque a pergunta é sobre devolução; ele é testado no cenário `ana_tracking_code`.
+   - O agente precisa combinar dados e política: o direito de arrependimento conta a partir do recebimento (seção 4.1), então continua valendo quando o pedido chegar; reconhecer o atraso (vale em qualquer assunto sobre um pedido atrasado, não só em pergunta de entrega). Desistir antes de receber é cancelamento, que o agente não promete: ele **oferece** encaminhar à equipe e só abre o chamado se a cliente aceitar, porque ela pode preferir esperar e devolver depois (chamado só para o que o agente não resolve). O código de rastreio não é exigido aqui, porque a pergunta é sobre devolução; ele é testado no cenário `ana_tracking_code`.
    - É o cenário não trivial, e mais interessante do que um "sim, pode devolver".
 4. Produto sem estoque/descontinuado → alternativas vindas da tool. O cliente chega irritado ("já é a terceira vez que pergunto!"), o que mostra o tom `frustrated` em ação.
 5. Guardrails:
