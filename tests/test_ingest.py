@@ -354,3 +354,42 @@ def test_readwrite_connection_can_write(store):
     finally:
         conn.close()
     assert query(store, "SELECT x FROM scratch") == [(1,)]
+
+
+# ---------- banco criado por uma versão anterior ----------
+
+OWN_TABLES = ("messages", "audit_log", "data_requests", "support_tickets", "ticket_notes")
+
+
+def tables(store) -> set[str]:
+    return {r[0] for r in query(store, "SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+
+def test_startup_creates_missing_own_tables_without_reimporting(store):
+    # banco de uma versão anterior: CSVs importados, sem as tabelas próprias criadas depois
+    ingest.ingest_all()
+    conn = db.connect_rw()
+    conn.execute("INSERT INTO support_tickets (customer_id, phone, order_id, reason, summary, thread_id, created_at, status) "
+                 "VALUES (2, NULL, 8, 'atraso', 'chamado antigo', 't1', '2026-03-25', 'open')")
+    for table in ("ticket_notes", "audit_log", "messages"):
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+    conn.commit()
+    conn.close()
+
+    assert ingest.startup() is False  # CSVs não mudaram: nada a reimportar
+    assert set(OWN_TABLES) <= tables(store)
+    assert query(store, "SELECT summary FROM support_tickets") == [("chamado antigo",)]  # nada foi apagado
+
+
+def test_startup_creates_own_tables_even_when_a_csv_is_rejected(store):
+    ingest.ingest_all()
+    conn = db.connect_rw()
+    conn.execute("DROP TABLE IF EXISTS ticket_notes")
+    conn.commit()
+    conn.close()
+    rows = csv_rows(store, "products.csv")
+    write_csv(store, "products.csv", [{k: v for k, v in r.items() if k != "price_brl"} for r in rows])
+    bump_mtime(store, "products.csv")
+
+    ingest.startup()  # CSV rejeitado: vai para o log e o agente segue com os dados anteriores
+    assert "ticket_notes" in tables(store)
