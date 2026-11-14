@@ -665,6 +665,14 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     - filtros em `get_my_orders` (`product`, `status`, `since`), quando os clientes tiverem histórico longo;
     - índice em `orders(customer_id, order_date)`;
     - janela de histórico da conversa: reenviar só os últimos N turnos e resumir os resultados de tools antigos;
+  - **variação medida e refinamentos com mais tempo:** a linha de base e2e (`scripts/e2e_baseline.sh`, 3 rodadas × 36 cenários) passou de 32/32/31 para 34/34/32 depois das correções. Nenhuma falha restante é alucinação ou informação errada: o `output_guard` barra fato sem fonte, e as falhas são de completude ou de estilo, de forma intermitente (1 em 3). Refinamentos que ficam para depois:
+    - pedido confirmado fora do prazo às vezes não cita o prazo da política ("até 3 dias úteis"), embora a tool o devolva;
+    - na descoberta, o agente às vezes busca produtos antes de perguntar o estilo, ou não busca depois da resposta (`discovery_nylon`);
+    - reembolso fora do arrependimento às vezes não abre o chamado (`policy_refund_other_cases`);
+    - frete especial às vezes não cita a cotação pela equipe;
+    - no 2º turno de uma reclamação, o agente às vezes repete de memória os dias de atraso; o guard barra e o retry consulta de novo, com uma ida a mais ao modelo;
+    - o tom e a categoria do `input_guard` variam em mensagens ambíguas; os cenários de terceiros verificam o efeito (nenhuma tool de escrita), não a categoria.
+    - Caminho para fechar: rodar a linha de base a cada mudança de prompt (cada regra nova pode tirar peso de outra: a regra do arrependimento com atraso, na 1ª versão, fez as respostas de entrega perderem o prazo e o rastreio), e testar `effort` maior ou um modelo maior só nas classes que falham.
   - eval set maior e observabilidade (tracing);
   - handoff humano real;
   - autenticação de funcionários na UI;
@@ -697,6 +705,10 @@ O uv instala o Python 3.11+ e as dependências. O README também terá a alterna
     | Contexto da conversa | Reenviar o histórico inteiro, com tool results | "Podemos cair em poluição de contexto?" | Janela de 10 turnos, resultados antigos omitidos, e teste e2e de conversa longa |
     | Perguntas complexas | Rotear para um modelo maior pelo input_guard | "Isso já é multi-agente? É overengineering?" | Adiado: é roteamento de modelo, não multi-agente, e seria otimizar sem evidência. Primeiro medir pelo `audit_log`; depois `effort`, roteamento e handoff humano, nessa ordem |
     | Identidade do cliente | Número do pedido + e-mail no chat | "Teremos login?" | Canal WhatsApp: `respond(phone, text)`, cliente resolvido pelo telefone em código, nunca pelo LLM |
+    | Fontes do output_guard entre turnos | Só resultados de tool do turno atual | O guard reprovava o protocolo, o número do pedido e o rastreio que o próprio agente tinha dado no turno anterior; corrigir um por vez não fechava | Identificadores duráveis do próprio cliente (pedido, rastreio, protocolo) valem sempre, lidos do banco; preço, estoque, status e atraso exigem nova consulta. O que o cliente digita nunca é fonte |
+    | Dados de terceiros no input_guard | `manipulation` para pedidos de dados de outros clientes | "O input guard já tem os dados do cliente?" Não: ele não sabe quem escreve, e decidia pela forma da frase | Vão para o agente; o código isola os dados. Os testes verificam o efeito (nenhuma tool de escrita), não a categoria |
+    | Reclamação repetida | Um chamado por motivo; depois, reaproveitar o chamado e descartar o resumo novo | O agente dizia "registrei sua reclamação" sem ter gravado nada | Um chamado por pedido; a informação nova vira anotação (`ticket_notes`, só INSERT) |
+    | Validação do prompt | Rodar 1 ou 2 cenários depois de cada ajuste | "A cada iteração você corrige uma coisa e outras aparecem" | Linha de base: e2e completo 3 vezes, com taxa de acerto por cenário e cada turno gravado; corrigir primeiro o que falha sempre |
     | Persona | Atendente genérico com temperature 0 | Atendente deve ser músico; "temperatura não zerada?" | Roqueiro com descoberta do estilo do cliente; tom via few-shot, porque o modelo não aceita temperature |
     | Testes | Testes depois da implementação | "Podemos começar pelos testes?" | TDD nas partes determinísticas; critérios de aceite e2e escritos antes do agente |
     | Reingestão dos CSVs | Reingerir quando o mtime for mais novo que a última importação, checando a cada consulta | Um teste do commit 3, de outra sessão, exigia detectar qualquer mudança de conteúdo, e o assistente propôs mtime + tamanho + sha256. "Isso pode subir uma base mais antiga?" | Regra estrita, com a premissa de que a loja sempre cola um export novo: mtime mais antigo é erro. Limite assumido: conteúdo diferente com o mesmo mtime não é detectado |
